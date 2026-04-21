@@ -1067,157 +1067,287 @@ vps_node_quality() {
 }
 
 vps_check_place() {
-    local _sep="${CYAN}──────────────────────────────────────────────────${NC}"
+    local _SEP="${CYAN}──────────────────────────────────────────────────${NC}"
+    local _TMPDIR; _TMPDIR=$(mktemp -d)
+    local _intl_n=0
 
-    _cp_section() { echo -e "\n${YELLOW}▶ $1${NC}"; }
-    _cp_row()     { printf "  %-26s %s\n" "$1" "$2"; }
-    _cp_ok()      { echo -e "  ${GREEN}$1${NC}"; }
-    _cp_warn()    { echo -e "  ${YELLOW}$1${NC}"; }
+    _ck_hdr()  { echo ""; echo -e " ${BOLD}${YELLOW}[ $1 ]${NC}"; echo -e " ${CYAN}──────────────────────────────────────────────────${NC}"; }
+    _ck_row()  { printf "  ${CYAN}%-24s${NC} %s\n" "$1" "$2"; }
+    _ck_warn() { echo -e "  ${YELLOW}$1${NC}"; }
 
     echo ""
     echo -e "${CYAN}╔══════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║        Network Quality Check (native)            ║${NC}"
+    echo -e "${CYAN}║           Network Quality Check                  ║${NC}"
+    echo -e "${CYAN}║  BGP · 策略 · 接入 · 三网延迟 · 回程 · 测速 · 国际  ║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}"
 
-    # ── 1. IP Detection ──────────────────────────────────────────────
-    _cp_section "IP Detection"
+    echo -ne "  ${YELLOW}检测 IP 地址...${NC}"
     local _ip4 _ip6
-    _ip4=$(curl -s4 --max-time 5 https://api4.ipify.org 2>/dev/null || \
-           curl -s4 --max-time 5 https://ipv4.icanhazip.com 2>/dev/null)
-    _ip6=$(curl -s6 --max-time 5 https://api6.ipify.org 2>/dev/null || \
-           curl -s6 --max-time 5 https://ipv6.icanhazip.com 2>/dev/null)
-    [[ -n "$_ip4" ]] && _cp_row "IPv4:" "$_ip4" || _cp_warn "IPv4:  not detected"
-    [[ -n "$_ip6" ]] && _cp_row "IPv6:" "$_ip6" || _cp_warn "IPv6:  not detected"
+    _ip4=$(curl -s4 --max-time 6 https://api4.ipify.org 2>/dev/null ||
+           curl -s4 --max-time 6 https://ipv4.icanhazip.com 2>/dev/null)
+    _ip6=$(curl -s6 --max-time 6 https://api6.ipify.org 2>/dev/null ||
+           curl -s6 --max-time 6 https://ipv6.icanhazip.com 2>/dev/null)
+    echo -e " ${GREEN}完成${NC}"
 
-    # ── 2. IP Info (ASN / Geo / Type) ────────────────────────────────
-    _cp_section "IP Information"
-    local _IPAPI _ORG _AS _ISP _COUNTRY _CITY _REGION _PROXY _HOSTING _MOBILE _TYPE
+    # ── 1/7  BGP 信息 ────────────────────────────────────────────────
+    _ck_hdr "1/7  BGP 信息  (ipinfo.io · bgpview.io)"
     if [[ -n "$_ip4" ]]; then
-        _IPAPI=$(curl -s --max-time 8 \
-            "http://ip-api.com/json/${_ip4}?fields=country,regionName,city,isp,org,as,proxy,hosting,mobile" \
-            2>/dev/null)
-        _COUNTRY=$(echo "$_IPAPI" | grep -o '"country":"[^"]*"'    | cut -d'"' -f4)
-        _REGION=$(echo "$_IPAPI"  | grep -o '"regionName":"[^"]*"' | cut -d'"' -f4)
-        _CITY=$(echo "$_IPAPI"    | grep -o '"city":"[^"]*"'       | cut -d'"' -f4)
-        _ISP=$(echo "$_IPAPI"     | grep -o '"isp":"[^"]*"'        | cut -d'"' -f4)
-        _ORG=$(echo "$_IPAPI"     | grep -o '"org":"[^"]*"'        | cut -d'"' -f4)
-        _AS=$(echo "$_IPAPI"      | grep -o '"as":"[^"]*"'         | cut -d'"' -f4)
-        _PROXY=$(echo "$_IPAPI"   | grep -o '"proxy":[^,}]*'       | cut -d: -f2 | tr -d ' ')
-        _HOSTING=$(echo "$_IPAPI" | grep -o '"hosting":[^,}]*'     | cut -d: -f2 | tr -d ' ')
-        _MOBILE=$(echo "$_IPAPI"  | grep -o '"mobile":[^,}]*'      | cut -d: -f2 | tr -d ' ')
+        local _II _II_ORG _BV _BGP_ASN _BGP_PREFIX _BGP_NAME _BGP_RIR
+        local _COUNTRY _REGION _CITY _PROXY _HOSTING _MOBILE _IP_TYPE _RDNS
+        _II=$(curl -s --max-time 8 "https://ipinfo.io/$_ip4/json" 2>/dev/null)
+        _II_ORG=$(echo "$_II"   | grep -o '"org": *"[^"]*"'      | sed 's/"org": *"//;s/"$//')
+        _COUNTRY=$(echo "$_II"  | grep -o '"country": *"[^"]*"'  | cut -d'"' -f4)
+        _REGION=$(echo "$_II"   | grep -o '"region": *"[^"]*"'   | cut -d'"' -f4)
+        _CITY=$(echo "$_II"     | grep -o '"city": *"[^"]*"'     | cut -d'"' -f4)
+        _RDNS=$(echo "$_II"     | grep -o '"hostname": *"[^"]*"' | cut -d'"' -f4)
 
-        _cp_row "Location:"   "${_CITY}, ${_REGION}, ${_COUNTRY}"
-        _cp_row "ISP:"        "$_ISP"
-        _cp_row "Org:"        "$_ORG"
-        _cp_row "ASN:"        "$_AS"
+        _BV=$(curl -s --max-time 8 "https://api.bgpview.io/ip/$_ip4" 2>/dev/null)
+        _BGP_ASN=$(echo "$_BV"    | grep -o '"asn":[0-9]*'     | head -1 | cut -d: -f2)
+        _BGP_PREFIX=$(echo "$_BV" | grep -o '"prefix":"[^"]*"' | head -1 | cut -d'"' -f4)
+        _BGP_NAME=$(echo "$_BV"   | grep -o '"name":"[^"]*"'   | head -2 | tail -1 | cut -d'"' -f4)
+        _BGP_RIR=$(echo "$_BV"    | grep -o '"rir":"[^"]*"'    | head -1 | cut -d'"' -f4)
 
-        if [[ "$_PROXY" == "true" ]]; then   _TYPE="Proxy/VPN"
-        elif [[ "$_HOSTING" == "true" ]]; then _TYPE="Datacenter/Hosting"
-        elif [[ "$_MOBILE" == "true" ]]; then  _TYPE="Mobile"
-        else                                   _TYPE="Residential"; fi
-        _cp_row "IP Type:"    "$_TYPE"
+        local _IA
+        _IA=$(curl -s --max-time 6 \
+            "http://ip-api.com/json/$_ip4?fields=proxy,hosting,mobile" 2>/dev/null)
+        _PROXY=$(echo "$_IA"   | grep -o '"proxy":[^,}]*'   | cut -d: -f2 | tr -d ' ')
+        _HOSTING=$(echo "$_IA" | grep -o '"hosting":[^,}]*' | cut -d: -f2 | tr -d ' ')
+        _MOBILE=$(echo "$_IA"  | grep -o '"mobile":[^,}]*'  | cut -d: -f2 | tr -d ' ')
+        if   [[ "$_PROXY"   == "true" ]]; then _IP_TYPE="代理/VPN"
+        elif [[ "$_HOSTING" == "true" ]]; then _IP_TYPE="数据中心/托管"
+        elif [[ "$_MOBILE"  == "true" ]]; then _IP_TYPE="移动网络"
+        else                                   _IP_TYPE="家庭/宽带"; fi
+
+        _ck_row "IPv4:"     "$_ip4"
+        [[ -n "$_ip6"  ]] && _ck_row "IPv6:"  "$_ip6"
+        [[ -n "$_RDNS" ]] && _ck_row "rDNS:"  "$_RDNS"
+        _ck_row "ASN:"      "AS${_BGP_ASN:-未知}  ${_BGP_NAME:-${_II_ORG:-}}"
+        _ck_row "路由前缀:" "${_BGP_PREFIX:-未知}"
+        [[ -n "$_BGP_RIR" ]] && _ck_row "RIR:" "$_BGP_RIR"
+        _ck_row "位置:"     "${_CITY:-?}, ${_REGION:-?}, ${_COUNTRY:-?}"
+        _ck_row "IP 类型:"  "$_IP_TYPE"
     else
-        _cp_warn "  Skipped — no IPv4 address"
+        _ck_warn "无法获取 IPv4 地址，跳过"
     fi
 
-    # ── 3. NAT Detection ─────────────────────────────────────────────
-    _cp_section "NAT Detection"
-    local _int_ip _ext_ip
-    _int_ip=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+')
-    _ext_ip="$_ip4"
-    _cp_row "Internal IP:" "${_int_ip:-n/a}"
-    _cp_row "External IP:" "${_ext_ip:-n/a}"
-    if [[ -z "$_int_ip" || -z "$_ext_ip" ]]; then
-        _cp_warn "NAT status: unknown"
-    elif [[ "$_int_ip" == "$_ext_ip" ]]; then
-        _cp_ok   "NAT type:   Full-cone / No NAT (direct public IP)"
-    else
-        _cp_warn "NAT type:   Behind NAT  (internal ≠ external)"
-    fi
+    # ── 2/7  本地策略 ────────────────────────────────────────────────
+    _ck_hdr "2/7  本地策略"
+    echo -e "  ${CYAN}IP 路由规则:${NC}"
+    ip rule list 2>/dev/null | head -8 | sed 's/^/    /'
+    echo ""
+    echo -e "  ${CYAN}默认路由:${NC}"
+    ip route show default 2>/dev/null | sed 's/^/    /'
 
-    # ── 4. TCP Stack ─────────────────────────────────────────────────
-    _cp_section "TCP Stack Configuration"
-    local _cc _qdisc _rmem _wmem _tw _mtu_probe
-    _cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "n/a")
-    _qdisc=$(sysctl -n net.core.default_qdisc 2>/dev/null || echo "n/a")
-    _rmem=$(sysctl -n net.core.rmem_max 2>/dev/null | awk '{printf "%.0f KB", $1/1024}' || echo "n/a")
-    _wmem=$(sysctl -n net.core.wmem_max 2>/dev/null | awk '{printf "%.0f KB", $1/1024}' || echo "n/a")
-    _tw=$(sysctl -n net.ipv4.tcp_tw_reuse 2>/dev/null || echo "n/a")
-    _mtu_probe=$(sysctl -n net.ipv4.tcp_mtu_probing 2>/dev/null || echo "n/a")
-    _cp_row "Congestion Ctrl:"    "$_cc"
-    _cp_row "Queue Discipline:"   "$_qdisc"
-    _cp_row "Recv Buffer Max:"    "$_rmem"
-    _cp_row "Send Buffer Max:"    "$_wmem"
-    _cp_row "tcp_tw_reuse:"       "$_tw"
-    _cp_row "tcp_mtu_probing:"    "$_mtu_probe"
-
-    # ── 5. Network Interface ─────────────────────────────────────────
-    _cp_section "Network Interface"
-    local _iface _mtu _speed _duplex _rx _tx
+    # ── 3/7  接入信息 ────────────────────────────────────────────────
+    _ck_hdr "3/7  接入信息"
+    local _iface _mtu _speed _rx _tx _int_ip _cc _qdisc _rmem _wmem _tw _mtu_p
     _iface=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'dev \K\S+')
+    _int_ip=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+')
     if [[ -n "$_iface" ]]; then
-        _mtu=$(cat /sys/class/net/"${_iface}"/mtu 2>/dev/null || echo "n/a")
-        _speed=$(cat /sys/class/net/"${_iface}"/speed 2>/dev/null || echo "n/a")
-        _duplex=$(cat /sys/class/net/"${_iface}"/duplex 2>/dev/null || echo "n/a")
-        _rx=$(awk '{printf "%.2f GB", $1/1024/1024/1024}' \
-              /sys/class/net/"${_iface}"/statistics/rx_bytes 2>/dev/null || echo "n/a")
-        _tx=$(awk '{printf "%.2f GB", $1/1024/1024/1024}' \
-              /sys/class/net/"${_iface}"/statistics/tx_bytes 2>/dev/null || echo "n/a")
-        _cp_row "Interface:"    "$_iface"
-        _cp_row "MTU:"          "${_mtu} bytes"
-        [[ "$_speed" != "-1" && "$_speed" != "n/a" ]] && \
-            _cp_row "Link Speed:"   "${_speed} Mbps" || \
-            _cp_row "Link Speed:"   "n/a"
-        _cp_row "Duplex:"       "$_duplex"
-        _cp_row "RX Total:"     "$_rx"
-        _cp_row "TX Total:"     "$_tx"
-    else
-        _cp_warn "Could not determine default interface"
+        _mtu=$(cat /sys/class/net/"${_iface}"/mtu 2>/dev/null)
+        _speed=$(cat /sys/class/net/"${_iface}"/speed 2>/dev/null)
+        _rx=$(awk '{printf "%.2f GB", $1/1073741824}' \
+              /sys/class/net/"${_iface}"/statistics/rx_bytes 2>/dev/null)
+        _tx=$(awk '{printf "%.2f GB", $1/1073741824}' \
+              /sys/class/net/"${_iface}"/statistics/tx_bytes 2>/dev/null)
     fi
+    _cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
+    _qdisc=$(sysctl -n net.core.default_qdisc 2>/dev/null)
+    _rmem=$(sysctl -n net.core.rmem_max 2>/dev/null | awk '{printf "%.0f KB", $1/1024}')
+    _wmem=$(sysctl -n net.core.wmem_max 2>/dev/null | awk '{printf "%.0f KB", $1/1024}')
+    _tw=$(sysctl -n net.ipv4.tcp_tw_reuse 2>/dev/null)
+    _mtu_p=$(sysctl -n net.ipv4.tcp_mtu_probing 2>/dev/null)
+    local _nat
+    if   [[ -z "$_int_ip" || -z "$_ip4" ]]; then _nat="未知"
+    elif [[ "$_int_ip" == "$_ip4" ]];        then _nat="公网直连 (无 NAT)"
+    else                                          _nat="NAT  (${_int_ip} → ${_ip4})"; fi
+    _ck_row "出口接口:"        "${_iface:-n/a}"
+    _ck_row "NAT 状态:"        "$_nat"
+    _ck_row "MTU:"             "${_mtu:-n/a} bytes"
+    if [[ -n "$_speed" && "$_speed" != "-1" ]]; then
+        _ck_row "链路速率:"    "${_speed} Mbps"
+    else
+        _ck_row "链路速率:"    "n/a"
+    fi
+    _ck_row "拥塞控制:"        "${_cc:-n/a}"
+    _ck_row "队列规则:"        "${_qdisc:-n/a}"
+    _ck_row "收发缓冲:"        "recv ${_rmem:-n/a}  /  send ${_wmem:-n/a}"
+    _ck_row "tcp_tw_reuse:"    "${_tw:-n/a}"
+    _ck_row "tcp_mtu_probing:" "${_mtu_p:-n/a}"
+    _ck_row "累计收流量:"      "${_rx:-n/a}"
+    _ck_row "累计发流量:"      "${_tx:-n/a}"
 
-    # ── 6. Global Latency ────────────────────────────────────────────
-    _cp_section "Global Latency"
-    printf "  %-28s %-12s %-8s %s\n" "Target" "Location" "Loss" "Latency"
-    echo -e "  ${CYAN}──────────────────────────────────────────────────${NC}"
+    # ── 4/7  三网 TCP 大包延迟 ────────────────────────────────────────
+    _ck_hdr "4/7  三网 TCP 大包延迟  (ping -s 1400, 3 包, 并行)"
+    echo -e "  ${CYAN}并行测试中，请稍候...${NC}"
 
-    _ping_host() {
-        local _label="$1" _host="$2" _loc="$3"
-        local _out _loss _avg _ms _col
-        _out=$(ping -c 5 -W 2 "$_host" 2>/dev/null)
-        if [[ $? -ne 0 || -z "$_out" ]]; then
-            printf "  %-28s %-12s %-8s %s\n" "$_label" "$_loc" "---" "timeout"
-            return
-        fi
-        _loss=$(echo "$_out" | grep -oP '\d+(?=% packet loss)')
-        _avg=$(echo "$_out"  | grep -oP 'rtt.*= [0-9.]+/\K[0-9.]+')
-        if [[ -z "$_avg" ]]; then
-            _avg=$(echo "$_out" | grep -oP 'avg/[0-9.]+' | cut -d/ -f2)
-        fi
-        _ms="${_avg:-?}"
-        if [[ "$_loss" == "100" ]]; then
-            _col="$RED"
-        elif (( $(echo "$_ms < 150" | bc -l 2>/dev/null || echo 0) )); then
-            _col="$GREEN"
-        elif (( $(echo "$_ms < 300" | bc -l 2>/dev/null || echo 0) )); then
-            _col="$YELLOW"
+    local _NODES=(
+        "电信|219.141.136.10|北京"    "电信|202.96.209.133|上海"   "电信|202.96.128.86|广州"
+        "电信|61.139.2.69|成都"       "电信|202.103.24.68|武汉"    "电信|60.191.134.205|南京"
+        "电信|61.164.1.101|杭州"      "电信|218.85.157.99|福州"    "电信|60.214.0.126|济南"
+        "电信|202.97.224.69|哈尔滨"   "电信|61.187.54.68|长沙"     "电信|202.99.0.68|石家庄"
+        "联通|202.106.196.115|北京"   "联通|210.22.97.1|上海"      "联通|221.7.92.98|广州"
+        "联通|221.5.88.88|成都"       "联通|58.50.0.25|武汉"       "联通|221.6.4.66|南京"
+        "联通|221.12.1.227|杭州"      "联通|202.101.103.55|福州"   "联通|202.102.128.68|济南"
+        "联通|202.97.0.68|哈尔滨"     "联通|58.20.127.170|长沙"    "联通|202.99.165.195|石家庄"
+        "移动|221.130.33.52|北京"     "移动|211.137.160.5|上海"    "移动|120.196.165.24|广州"
+        "移动|211.137.58.20|成都"     "移动|211.137.96.205|武汉"   "移动|211.138.180.2|南京"
+        "移动|211.138.45.26|杭州"     "移动|211.138.106.2|福州"    "移动|218.207.254.2|济南"
+        "移动|211.137.32.5|哈尔滨"    "移动|211.138.30.66|长沙"    "移动|221.179.46.190|石家庄"
+    )
+
+    _bg_ping() {
+        local _isp="$1" _host="$2" _city="$3"
+        local _out _loss _avg
+        _out=$(ping -c 3 -W 3 -s 1400 "$_host" 2>/dev/null)
+        if ! echo "$_out" | grep -q "bytes from"; then
+            echo "${_isp}|${_city}|${_host}|---|超时"
         else
-            _col="$RED"
+            _loss=$(echo "$_out" | grep -oP '\d+(?=% packet loss)')
+            _avg=$(echo "$_out"  | grep -oP 'rtt.*=\s*[0-9.]+/\K[0-9.]+')
+            echo "${_isp}|${_city}|${_host}|${_loss:-0}%|${_avg:-?}"
         fi
-        printf "  %-28s %-12s %-8s " "$_label" "$_loc" "${_loss:-0}%"
-        echo -e "${_col}${_ms} ms${NC}"
     }
 
-    _ping_host "Cloudflare (1.1.1.1)"      1.1.1.1          "Global"
-    _ping_host "Google (8.8.8.8)"          8.8.8.8          "Global"
-    _ping_host "Quad9 (9.9.9.9)"           9.9.9.9          "Global"
-    _ping_host "CleanBrowsing (185.228.168.9)" 185.228.168.9 "EU"
-    _ping_host "AdGuard (94.140.14.14)"    94.140.14.14     "EU"
-    _ping_host "KT Korea (168.126.63.1)"   168.126.63.1     "Asia"
+    local _pids=() _ri=0 _ent _pisp _pip _pcity
+    for _ent in "${_NODES[@]}"; do
+        IFS='|' read -r _pisp _pip _pcity <<< "$_ent"
+        _bg_ping "$_pisp" "$_pip" "$_pcity" > "${_TMPDIR}/p${_ri}" &
+        _pids+=($!)
+        ((_ri++))
+    done
+    wait "${_pids[@]}" 2>/dev/null
+
+    local _carrier
+    for _carrier in "电信" "联通" "移动"; do
+        echo ""
+        printf "  ${BOLD}%-6s${NC}  %-12s %-20s %-8s %s\n" \
+               "$_carrier" "城市" "IP" "丢包" "延迟"
+        echo -e "  ${CYAN}────────────────────────────────────────────────────${NC}"
+        local _ji
+        for _ji in "${!_NODES[@]}"; do
+            local _fisp _fcity _fip _floss _fms
+            IFS='|' read -r _fisp _fcity _fip <<< "${_NODES[$_ji]}"
+            [[ "$_fisp" != "$_carrier" ]] && continue
+            [[ ! -f "${_TMPDIR}/p${_ji}" ]]  && continue
+            IFS='|' read -r _ _ _ _floss _fms < "${_TMPDIR}/p${_ji}"
+            local _fcol
+            if   [[ "$_fms" == "超时" ]]; then                              _fcol="$RED"
+            elif awk "BEGIN{exit !(${_fms}+0 < 100)}" 2>/dev/null; then    _fcol="$GREEN"
+            elif awk "BEGIN{exit !(${_fms}+0 < 200)}" 2>/dev/null; then    _fcol="$YELLOW"
+            else                                                             _fcol="$RED"; fi
+            printf "  %-14s %-20s %-8s " "$_fcity" "$_fip" "$_floss"
+            [[ "$_fms" == "超时" ]] && echo -e "${_fcol}超时${NC}" \
+                                    || echo -e "${_fcol}${_fms} ms${NC}"
+        done
+    done
+
+    # ── 5/7  三网回程路由 ────────────────────────────────────────────
+    _ck_hdr "5/7  三网回程路由"
+    local _tr_cmd=""
+    command -v traceroute &>/dev/null && _tr_cmd="traceroute -n -q 1 -w 2 -m 20"
+    [[ -z "$_tr_cmd" ]] && command -v tracepath &>/dev/null && \
+        _tr_cmd="tracepath -n -m 20"
+
+    _tracert() {
+        local _isp="$1" _host="$2" _city="$3"
+        echo -e "\n  ${CYAN}▶ ${_isp} → ${_city} (${_host})${NC}"
+        if [[ -z "$_tr_cmd" ]]; then
+            _ck_warn "  未安装 traceroute / tracepath，跳过"; return
+        fi
+        $_tr_cmd "$_host" 2>/dev/null | head -20 | \
+            while IFS= read -r _tl; do printf "    %s\n" "$_tl"; done
+    }
+
+    _tracert "电信" "202.96.128.86"  "广州"
+    _tracert "联通" "210.22.97.1"    "上海"
+    _tracert "移动" "211.137.160.5"  "上海"
+
+    # ── 6/7  国内测速 ────────────────────────────────────────────────
+    _ck_hdr "6/7  国内测速  (Speedtest.NET · CDN 镜像)"
+
+    _dl_speed() {
+        local _label="$1" _url="$2" _note="$3"
+        local _spd _mbps
+        _spd=$(curl -s -o /dev/null -w "%{speed_download}" \
+               --max-time 12 --connect-timeout 5 "$_url" 2>/dev/null)
+        if [[ -z "$_spd" || "$_spd" == "0.000" || "$_spd" == "0" ]]; then
+            printf "  %-26s %-14s %s\n" "$_label" "$_note" "超时/失败"
+        else
+            _mbps=$(awk "BEGIN{printf \"%.2f Mbps\", ${_spd}*8/1000000}")
+            printf "  %-26s %-14s " "$_label" "$_note"
+            echo -e "${GREEN}${_mbps}${NC}"
+        fi
+    }
+
+    if command -v speedtest-cli &>/dev/null; then
+        echo -e "  ${CYAN}使用 speedtest-cli 自动选择最优节点...${NC}"
+        echo ""
+        speedtest-cli --no-upload 2>/dev/null | \
+            grep -E 'Hosted|Ping|Download' | sed 's/^/  /'
+        echo ""
+    fi
+
+    printf "  %-26s %-14s %s\n" "节点" "运营商" "下载速度"
+    echo -e "  ${CYAN}────────────────────────────────────────────────${NC}"
+    _dl_speed "阿里云 杭州"       "https://mirrors.aliyun.com/ubuntu/ls-lR.gz"             "BGP/电信"
+    _dl_speed "腾讯云 广州"       "https://mirrors.cloud.tencent.com/ubuntu/ls-lR.gz"      "BGP/移动"
+    _dl_speed "华为云 北京"       "https://mirrors.huaweicloud.com/ubuntu/ls-lR.gz"        "BGP"
+    _dl_speed "网易 广州"         "https://mirrors.163.com/ubuntu/ls-lR.gz"               "BGP"
+    _dl_speed "中科大 合肥"       "https://mirrors.ustc.edu.cn/ubuntu/ls-lR.gz"           "教育网"
+    _dl_speed "清华大学 北京"     "https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ls-lR.gz"  "教育网"
+
+    # ── 7/7  国际互连 ────────────────────────────────────────────────
+    _ck_hdr "7/7  国际互连  (五大洲)"
+    printf "  %-26s %-14s %-8s %s\n" "节点" "地区" "延迟" "下载速度"
+    echo -e "  ${CYAN}────────────────────────────────────────────────────${NC}"
+
+    _intl_test() {
+        local _label="$1" _url="$2" _phost="$3" _region="$4"
+        local _pfile="${_TMPDIR}/it${_intl_n}"
+        ((_intl_n++))
+        ping -c 3 -W 2 "$_phost" > "$_pfile" 2>/dev/null &
+        local _ppid=$!
+        local _spd
+        _spd=$(curl -s -o /dev/null -w "%{speed_download}" \
+               --max-time 10 --connect-timeout 5 "$_url" 2>/dev/null)
+        wait "$_ppid" 2>/dev/null
+        local _pout _loss _avg _ms _mbps _col
+        _pout=$(cat "$_pfile" 2>/dev/null)
+        _loss=$(echo "$_pout" | grep -oP '\d+(?=% packet loss)')
+        _avg=$(echo "$_pout"  | grep -oP 'rtt.*=\s*[0-9.]+/\K[0-9.]+')
+        _ms="${_avg:-?}"
+        if   [[ -z "$_spd" || "$_spd" == "0.000" ]]; then _mbps="超时"
+        else _mbps=$(awk "BEGIN{printf \"%.1f Mbps\", ${_spd}*8/1000000}"); fi
+        if   [[ "$_ms" == "?" ]]; then                                  _col="$RED"
+        elif awk "BEGIN{exit !(${_ms}+0 < 150)}" 2>/dev/null; then     _col="$GREEN"
+        elif awk "BEGIN{exit !(${_ms}+0 < 300)}" 2>/dev/null; then     _col="$YELLOW"
+        else                                                             _col="$RED"; fi
+        printf "  %-26s %-14s " "$_label" "$_region"
+        echo -e "${_col}${_ms} ms  /  ${_mbps}${NC}"
+    }
+
+    # 亚太
+    _intl_test "Vultr Tokyo"        "https://hnd-jp-ping.vultr.com/vultr.com.100MB.bin"    "hnd-jp-ping.vultr.com"       "亚太·东京"
+    _intl_test "Vultr Singapore"    "https://sgp-ping.vultr.com/vultr.com.100MB.bin"       "sgp-ping.vultr.com"          "亚太·新加坡"
+    _intl_test "Linode Tokyo"       "https://speedtest.tokyo2.linode.com/100MB-tokyo2.bin" "speedtest.tokyo2.linode.com" "亚太·东京"
+    # 北美
+    _intl_test "Vultr Los Angeles"  "https://lax-ca-us-ping.vultr.com/vultr.com.100MB.bin" "lax-ca-us-ping.vultr.com"    "北美·洛杉矶"
+    _intl_test "Vultr New York"     "https://nj-us-ping.vultr.com/vultr.com.100MB.bin"     "nj-us-ping.vultr.com"        "北美·纽约"
+    _intl_test "Cloudflare"         "https://speed.cloudflare.com/__down?bytes=104857600"  "1.1.1.1"                     "全球 CDN"
+    # 欧洲
+    _intl_test "Vultr Frankfurt"    "https://fra-de-ping.vultr.com/vultr.com.100MB.bin"    "fra-de-ping.vultr.com"       "欧洲·法兰克福"
+    _intl_test "Linode London"      "https://speedtest.london.linode.com/100MB-london.bin" "speedtest.london.linode.com" "欧洲·伦敦"
+    # 南美
+    _intl_test "Vultr Sao Paulo"    "https://sao-br-ping.vultr.com/vultr.com.100MB.bin"    "sao-br-ping.vultr.com"       "南美·圣保罗"
+    # 非洲
+    _intl_test "Vultr Johannesburg" "https://jnb-za-ping.vultr.com/vultr.com.100MB.bin"    "jnb-za-ping.vultr.com"       "非洲·约翰内斯堡"
 
     echo ""
-    echo -e "$_sep"
-    echo -e "  ${GREEN}Done.${NC}"
+    echo -e "  $_SEP"
+    echo -e "  ${GREEN}检测完成。${NC}"
     echo ""
+    rm -rf "$_TMPDIR"
 }
 
 vps_hardware_quality() {
