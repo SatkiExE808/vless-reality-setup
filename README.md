@@ -1,12 +1,13 @@
-# VLESS Reality Setup
+# sing-box VLESS Reality Manager
 
-One-command [sing-box](https://github.com/SagerNet/sing-box) VLESS + Reality installer for any Debian/Ubuntu VPS.
+A clean, interactive installer and manager for [sing-box](https://github.com/SagerNet/sing-box) with **VLESS Reality** and **Hysteria2** support.
 
-- Automatically installs the latest sing-box
-- Generates fresh UUID, Reality keypair, and Short ID
-- Creates and validates the config
-- Registers and starts a systemd service
-- Prints a ready-to-import VLESS link
+- Interactive menu — install, manage, update, uninstall
+- Auto-installs latest sing-box binary
+- Generates fresh UUID, Reality keypair, and Short ID on every install
+- QR code output for mobile clients
+- Supports `amd64` and `arm64`
+- Tested on Debian 11/12 and Ubuntu 20.04+
 
 ---
 
@@ -16,61 +17,88 @@ One-command [sing-box](https://github.com/SagerNet/sing-box) VLESS + Reality ins
 bash <(curl -sL https://raw.githubusercontent.com/SatkiExE808/vless-reality-setup/main/setup.sh)
 ```
 
-Custom port (default is `443`):
-
-```bash
-bash <(curl -sL https://raw.githubusercontent.com/SatkiExE808/vless-reality-setup/main/setup.sh) 8443
-```
-
-> Requires root. Tested on Debian 12 / Ubuntu 22+.
+> Requires root. Run on a fresh Debian/Ubuntu VPS.
 
 ---
 
-## What Gets Installed
+## Menu
+
+```
+╔══════════════════════════════════════════════╗
+║  sing-box VLESS Reality Manager              ║
+║  github.com/SatkiExE808/vless-reality-setup  ║
+╚══════════════════════════════════════════════╝
+
+  Status : ● running   Version : 1.13.9
+
+  1. Show Config & Links
+  2. Restart Service
+  3. Stop / Start Service
+  4. View Logs
+  5. Update sing-box
+  6. Reinstall
+  7. Uninstall
+
+  0. Exit
+```
+
+---
+
+## Protocols
+
+| Protocol | Transport | Use Case |
+|---|---|---|
+| **VLESS Reality** | TCP | Most secure, indistinguishable from real HTTPS |
+| **Hysteria2** | UDP (QUIC) | High speed, low latency |
+| **Both** | TCP + UDP | Best of both |
+
+### VLESS Reality
+
+Uses the real TLS certificate of `www.microsoft.com` via the Reality protocol. Traffic looks exactly like a normal HTTPS connection — no self-signed certs, no detectable fingerprints.
+
+| Field | Value |
+|---|---|
+| Flow | `xtls-rprx-vision` |
+| SNI | `www.microsoft.com` |
+| Fingerprint | `chrome` |
+| Transport | TCP |
+
+### Hysteria2
+
+Self-signed certificate with QUIC transport. Ideal for high-bandwidth or high-latency connections.
+
+---
+
+## Installation Details
 
 | Path | Purpose |
 |---|---|
 | `/usr/local/bin/sing-box` | sing-box binary |
-| `/etc/sing-box/config.json` | VLESS Reality config |
+| `/etc/sing-box/config.json` | Active config |
+| `/etc/sing-box/.info` | Saved credentials |
+| `/etc/sing-box/cert.pem` | TLS cert (Hysteria2 only) |
 | `/etc/systemd/system/sing-box.service` | systemd service |
 
 ---
 
-## Output Example
+## Client Setup
 
-```
-════════════════════════════════════════
-  VLESS Reality Ready
-════════════════════════════════════════
-  Address:     1.2.3.4
-  Port:        443
-  UUID:        xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-  Flow:        xtls-rprx-vision
-  SNI:         www.microsoft.com
-  PublicKey:   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-  ShortID:     xxxxxxxxxxxxxxxx
-════════════════════════════════════════
-
-Import link:
-vless://...
-```
-
-Copy the import link and add it to your client.
-
----
-
-## Client Setup (v2rayN)
+### v2rayN (Windows)
 
 1. Copy the `vless://` link from the output
-2. In v2rayN → **Servers** → **Import bulk URL from clipboard**
-3. Right-click the new server → **Set as active server**
+2. **Servers** → **Import bulk URL from clipboard**
+3. Right-click → **Set as active server**
 4. Enable system proxy
 
-> Make sure **Flow** is set to `xtls-rprx-vision` in the server config. Without it, all connections will be rejected.
+> The **Flow** field must be `xtls-rprx-vision`. If missing, all connections will be rejected by the server.
+
+### NekoBox / Hiddify / v2rayNG (Android)
+
+Scan the QR code printed after installation, or paste the import link manually.
 
 ---
 
-## Manage the Service
+## Service Management
 
 ```bash
 # Status
@@ -79,7 +107,7 @@ systemctl status sing-box
 # Restart
 systemctl restart sing-box
 
-# Logs
+# Live logs
 journalctl -u sing-box -f
 
 # Stop
@@ -88,19 +116,11 @@ systemctl stop sing-box
 
 ---
 
-## Configuration Details
+## Re-run the Manager
 
-| Field | Value |
-|---|---|
-| Protocol | VLESS |
-| Security | Reality |
-| Flow | `xtls-rprx-vision` |
-| SNI | `www.microsoft.com` |
-| Fingerprint | `chrome` |
-| Transport | TCP |
-| Port | `443` (default) |
-
-Reality uses the real TLS certificate of the SNI target (`www.microsoft.com`), making the traffic indistinguishable from normal HTTPS — no self-signed certs, no TLS fingerprint leaks.
+```bash
+bash <(curl -sL https://raw.githubusercontent.com/SatkiExE808/vless-reality-setup/main/setup.sh)
+```
 
 ---
 
