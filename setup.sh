@@ -776,6 +776,267 @@ SYSCTL
     esac
 }
 
+# ── VPS Tools ─────────────────────────────────────────────────────────────────
+
+vps_check_ip() {
+    echo -e "${YELLOW}▶ Fetching IP info...${NC}"
+    local DATA IP COUNTRY REGION CITY ISP ORG AS PROXY HOSTING MOBILE
+    DATA=$(curl -s --max-time 10 \
+        "http://ip-api.com/json?fields=status,country,regionName,city,isp,org,as,proxy,hosting,mobile,query" \
+        2>/dev/null)
+    [[ -z "$DATA" ]] && echo -e "${RED}Failed to fetch IP info.${NC}" && return
+
+    IP=$(echo      "$DATA" | grep -oP '"query"\s*:\s*"\K[^"]+')
+    COUNTRY=$(echo "$DATA" | grep -oP '"country"\s*:\s*"\K[^"]+')
+    REGION=$(echo  "$DATA" | grep -oP '"regionName"\s*:\s*"\K[^"]+')
+    CITY=$(echo    "$DATA" | grep -oP '"city"\s*:\s*"\K[^"]+')
+    ISP=$(echo     "$DATA" | grep -oP '"isp"\s*:\s*"\K[^"]+')
+    ORG=$(echo     "$DATA" | grep -oP '"org"\s*:\s*"\K[^"]+')
+    AS=$(echo      "$DATA" | grep -oP '"as"\s*:\s*"\K[^"]+')
+    PROXY=$(echo   "$DATA" | grep -oP '"proxy"\s*:\s*\K(true|false)')
+    HOSTING=$(echo "$DATA" | grep -oP '"hosting"\s*:\s*\K(true|false)')
+    MOBILE=$(echo  "$DATA" | grep -oP '"mobile"\s*:\s*\K(true|false)')
+
+    echo ""
+    echo -e "${CYAN}══════════════════════════════════════════════════${NC}"
+    printf "  %-12s ${GREEN}%s${NC}\n" "IP:"       "$IP"
+    printf "  %-12s ${GREEN}%s, %s, %s${NC}\n" "Location:" "$CITY" "$REGION" "$COUNTRY"
+    printf "  %-12s ${GREEN}%s${NC}\n" "ISP:"      "$ISP"
+    printf "  %-12s ${GREEN}%s${NC}\n" "Org:"      "$ORG"
+    printf "  %-12s ${GREEN}%s${NC}\n" "AS:"       "$AS"
+    echo ""
+    [[ "$PROXY"   == "true" ]] \
+        && printf "  %-12s ${RED}● yes${NC}\n"    "Proxy/VPN:" \
+        || printf "  %-12s ${GREEN}● no${NC}\n"   "Proxy/VPN:"
+    [[ "$HOSTING" == "true" ]] \
+        && printf "  %-12s ${YELLOW}● yes${NC}\n" "Hosting:"   \
+        || printf "  %-12s ${GREEN}● no${NC}\n"   "Hosting:"
+    [[ "$MOBILE"  == "true" ]] \
+        && printf "  %-12s ${YELLOW}● yes${NC}\n" "Mobile:"    \
+        || printf "  %-12s ${GREEN}● no${NC}\n"   "Mobile:"
+    echo -e "${CYAN}══════════════════════════════════════════════════${NC}"
+}
+
+vps_speedtest() {
+    echo -e "${YELLOW}▶ Testing download speed...${NC}"
+    echo ""
+
+    local -a _URLS _LABELS
+    _URLS=(
+        "https://speed.cloudflare.com/__down?bytes=104857600"
+        "https://speedtest.tele2.net/100MB.zip"
+        "https://speed.hetzner.de/100MB.bin"
+        "https://lg-sin.vultr.com/100MB.bin"
+    )
+    _LABELS=(
+        "Cloudflare    (Global)"
+        "Tele2         (Europe)"
+        "Hetzner       (Germany)"
+        "Vultr         (Singapore)"
+    )
+
+    echo -e "${CYAN}──────────────────────────────────────────────────${NC}"
+    for i in "${!_URLS[@]}"; do
+        local _BYTES _MBPS
+        printf "  %-26s " "${_LABELS[$i]}"
+        _BYTES=$(curl -o /dev/null -s --max-time 20 -w "%{speed_download}" "${_URLS[$i]}" 2>/dev/null)
+        _MBPS=$(awk "BEGIN {printf \"%.2f\", ${_BYTES:-0}/1048576}")
+        echo -e "${GREEN}${_MBPS} MB/s${NC}"
+    done
+    echo -e "${CYAN}──────────────────────────────────────────────────${NC}"
+    echo ""
+
+    if command -v speedtest-cli &>/dev/null; then
+        confirm "Run speedtest-cli for upload speed too?" && echo "" && speedtest-cli --simple
+    elif command -v speedtest &>/dev/null; then
+        confirm "Run Ookla speedtest for upload speed too?" && echo "" && speedtest
+    else
+        echo -e "  ${CYAN}Tip: install speedtest-cli for upload testing${NC}"
+        echo -e "  ${CYAN}     pip3 install speedtest-cli${NC}"
+    fi
+}
+
+vps_check_dns() {
+    echo ""
+    echo -e "${CYAN}══════════════════════════════════════════════════${NC}"
+    echo -e " ${BOLD}Current DNS Servers:${NC}"
+    echo ""
+    grep "^nameserver" /etc/resolv.conf 2>/dev/null | while read -r _ ip; do
+        printf "  ${GREEN}%s${NC}\n" "$ip"
+    done
+    echo ""
+    echo -e " ${BOLD}Resolution Test:${NC}"
+    echo ""
+    for _dom in google.com cloudflare.com github.com; do
+        local _RES
+        _RES=$(getent hosts "$_dom" 2>/dev/null | awk '{print $1; exit}')
+        if [[ -n "$_RES" ]]; then
+            printf "  %-22s ${GREEN}%s${NC}\n" "$_dom" "$_RES"
+        else
+            printf "  %-22s ${RED}failed${NC}\n" "$_dom"
+        fi
+    done
+    echo ""
+    echo -e "${CYAN}══════════════════════════════════════════════════${NC}"
+}
+
+vps_change_dns() {
+    header
+    echo -e " ${BOLD}Change DNS${NC}"
+    echo ""
+    echo -e "  ${GREEN}1.${NC}  Google        ${CYAN}8.8.8.8 / 8.8.4.4${NC}"
+    echo -e "  ${GREEN}2.${NC}  Cloudflare    ${CYAN}1.1.1.1 / 1.0.0.1${NC}"
+    echo -e "  ${GREEN}3.${NC}  OpenDNS       ${CYAN}208.67.222.222 / 208.67.220.220${NC}"
+    echo -e "  ${GREEN}4.${NC}  Quad9         ${CYAN}9.9.9.9 / 149.112.112.112${NC}"
+    echo -e "  ${GREEN}5.${NC}  AdGuard       ${CYAN}94.140.14.14 / 94.140.15.15${NC}"
+    echo -e "  ${GREEN}6.${NC}  Comodo        ${CYAN}8.26.56.26 / 8.20.247.20${NC}"
+    echo -e "  ${GREEN}7.${NC}  Custom"
+    echo -e "  ${RED}0.${NC}  Back"
+    echo ""
+    read -rp "$(echo -e "${YELLOW}Choice: ${NC}")" _DC
+
+    local _D1 _D2
+    case "$_DC" in
+        0) return ;;
+        1) _D1="8.8.8.8";        _D2="8.8.4.4" ;;
+        2) _D1="1.1.1.1";        _D2="1.0.0.1" ;;
+        3) _D1="208.67.222.222"; _D2="208.67.220.220" ;;
+        4) _D1="9.9.9.9";        _D2="149.112.112.112" ;;
+        5) _D1="94.140.14.14";   _D2="94.140.15.15" ;;
+        6) _D1="8.26.56.26";     _D2="8.20.247.20" ;;
+        7)
+            read -rp "$(echo -e "${YELLOW}Primary DNS:   ${NC}")" _D1
+            read -rp "$(echo -e "${YELLOW}Secondary DNS: ${NC}")" _D2
+            [[ -z "$_D1" ]] && echo -e "${RED}Primary DNS cannot be empty.${NC}" && return
+            ;;
+        *) echo -e "${RED}Invalid.${NC}"; return ;;
+    esac
+
+    # Back up existing resolv.conf (follow symlink so we preserve content)
+    cp -L /etc/resolv.conf /etc/resolv.conf.bak 2>/dev/null
+
+    # On Ubuntu/Debian with systemd-resolved, /etc/resolv.conf is a symlink —
+    # remove it so we can write a real file
+    [[ -L /etc/resolv.conf ]] && rm /etc/resolv.conf
+
+    # Remove immutable flag if set
+    chattr -i /etc/resolv.conf 2>/dev/null
+
+    cat > /etc/resolv.conf << EOF
+nameserver ${_D1}
+nameserver ${_D2}
+EOF
+
+    echo -e "${GREEN}✓ DNS set to ${_D1} / ${_D2}${NC}"
+    echo -e "  ${CYAN}Backup saved to /etc/resolv.conf.bak${NC}"
+    echo ""
+    echo -e "${YELLOW}▶ Testing new DNS...${NC}"
+    if getent hosts google.com >/dev/null 2>&1; then
+        echo -e "${GREEN}✓ DNS resolution working.${NC}"
+    else
+        echo -e "${RED}✗ Resolution failed — restoring backup.${NC}"
+        cp /etc/resolv.conf.bak /etc/resolv.conf
+    fi
+}
+
+vps_ip_quality() {
+    echo -e "${YELLOW}▶ Checking IP quality...${NC}"
+    local _IP _DATA _PROXY _HOSTING _MOBILE _ISP _ORG _AS _COUNTRY _CC
+    _IP=$(curl -s4 --max-time 5 https://api.ipify.org 2>/dev/null)
+    [[ -z "$_IP" ]] && _IP=$(curl -s --max-time 5 https://api.ipify.org 2>/dev/null)
+    [[ -z "$_IP" ]] && echo -e "${RED}Failed to detect IP.${NC}" && return
+
+    _DATA=$(curl -s --max-time 10 \
+        "http://ip-api.com/json/${_IP}?fields=status,country,countryCode,isp,org,as,proxy,hosting,mobile,query" \
+        2>/dev/null)
+    [[ -z "$_DATA" ]] && echo -e "${RED}Failed to query IP info.${NC}" && return
+
+    _PROXY=$(echo   "$_DATA" | grep -oP '"proxy"\s*:\s*\K(true|false)')
+    _HOSTING=$(echo "$_DATA" | grep -oP '"hosting"\s*:\s*\K(true|false)')
+    _MOBILE=$(echo  "$_DATA" | grep -oP '"mobile"\s*:\s*\K(true|false)')
+    _ISP=$(echo     "$_DATA" | grep -oP '"isp"\s*:\s*"\K[^"]+')
+    _ORG=$(echo     "$_DATA" | grep -oP '"org"\s*:\s*"\K[^"]+')
+    _AS=$(echo      "$_DATA" | grep -oP '"as"\s*:\s*"\K[^"]+')
+    _COUNTRY=$(echo "$_DATA" | grep -oP '"country"\s*:\s*"\K[^"]+')
+    _CC=$(echo      "$_DATA" | grep -oP '"countryCode"\s*:\s*"\K[^"]+')
+
+    echo ""
+    echo -e "${CYAN}══════════════════════════════════════════════════${NC}"
+    echo -e " ${BOLD}IP Quality — ${_IP}${NC}"
+    echo -e "${CYAN}──────────────────────────────────────────────────${NC}"
+    printf "  %-14s ${GREEN}%s (%s)${NC}\n" "Country:"  "$_COUNTRY" "$_CC"
+    printf "  %-14s ${GREEN}%s${NC}\n"       "ISP:"     "$_ISP"
+    printf "  %-14s ${GREEN}%s${NC}\n"       "Org:"     "$_ORG"
+    printf "  %-14s ${GREEN}%s${NC}\n"       "AS:"      "$_AS"
+    echo ""
+    [[ "$_PROXY"   == "true" ]] \
+        && printf "  %-14s ${RED}● flagged as proxy / VPN${NC}\n"   "Proxy/VPN:" \
+        || printf "  %-14s ${GREEN}● clean${NC}\n"                   "Proxy/VPN:"
+    [[ "$_HOSTING" == "true" ]] \
+        && printf "  %-14s ${YELLOW}● datacenter / hosting IP${NC}\n" "Hosting:"  \
+        || printf "  %-14s ${GREEN}● clean${NC}\n"                    "Hosting:"
+    [[ "$_MOBILE"  == "true" ]] \
+        && printf "  %-14s ${YELLOW}● yes${NC}\n" "Mobile:"           \
+        || printf "  %-14s ${GREEN}● no${NC}\n"   "Mobile:"
+
+    # Risk summary
+    echo ""
+    local _RISK=0
+    [[ "$_PROXY"   == "true" ]] && ((_RISK++))
+    [[ "$_HOSTING" == "true" ]] && ((_RISK++))
+    if (( _RISK == 0 )); then
+        echo -e "  ${GREEN}✓ No risk flags detected.${NC}"
+    elif (( _RISK == 1 )); then
+        echo -e "  ${YELLOW}⚠ 1 risk flag detected.${NC}"
+    else
+        echo -e "  ${RED}✗ ${_RISK} risk flags detected.${NC}"
+    fi
+    echo -e "${CYAN}══════════════════════════════════════════════════${NC}"
+}
+
+vps_yabs() {
+    echo -e "${YELLOW}▶ Starting YABS benchmark...${NC}"
+    echo -e "  ${CYAN}Includes: disk I/O, CPU, and network speed tests.${NC}"
+    echo -e "  ${CYAN}May take 5–15 minutes. Press Ctrl+C to abort.${NC}"
+    echo ""
+    local _T0 _T1 _ELAPSED
+    _T0=$(date +%s)
+    bash <(curl -sL yabs.sh)
+    _T1=$(date +%s)
+    _ELAPSED=$(( _T1 - _T0 ))
+    echo ""
+    printf "  ${CYAN}Completed in %dm %ds${NC}\n" $((_ELAPSED/60)) $((_ELAPSED%60))
+}
+
+do_vps_tools() {
+    while true; do
+        header
+        echo -e " ${BOLD}VPS Tools${NC}"
+        echo ""
+        echo -e "  ${GREEN}1.${NC}  Check IP Info"
+        echo -e "  ${GREEN}2.${NC}  Speed Test"
+        echo -e "  ${GREEN}3.${NC}  Check DNS"
+        echo -e "  ${GREEN}4.${NC}  Change DNS"
+        echo -e "  ${GREEN}5.${NC}  IP Quality Check"
+        echo -e "  ${GREEN}6.${NC}  Run YABS Benchmark"
+        echo ""
+        echo -e "  ${RED}0.${NC}  Back"
+        echo ""
+        read -rp "$(echo -e "${YELLOW}Choice [0-6]: ${NC}")" _VT
+
+        case "$_VT" in
+            1) header; vps_check_ip;   pause ;;
+            2) header; vps_speedtest;  pause ;;
+            3) header; vps_check_dns;  pause ;;
+            4) vps_change_dns;         pause ;;
+            5) header; vps_ip_quality; pause ;;
+            6) header; vps_yabs;       pause ;;
+            0) return ;;
+            *) echo -e "${RED}Invalid.${NC}"; sleep 1 ;;
+        esac
+    done
+}
+
 # ── Uninstall ──────────────────────────────────────────────────────────────────
 
 do_uninstall() {
@@ -835,14 +1096,15 @@ main_menu() {
             echo -e "  ${GREEN}6.${NC} View Logs"
             echo -e "  ${GREEN}7.${NC} Update sing-box"
             echo -e "  ${GREEN}8.${NC} BBR Enable / Disable"
-            echo -e "  ${GREEN}9.${NC} Reinstall"
-            echo -e "  ${RED}10.${NC} Uninstall"
+            echo -e "  ${GREEN}9.${NC} VPS Tools"
+            echo -e "  ${GREEN}10.${NC} Reinstall"
+            echo -e "  ${RED}11.${NC} Uninstall"
             echo ""
             echo -e "  ${RED}0.${NC} Exit"
         fi
 
         echo ""
-        read -rp "$(echo -e "${YELLOW}Select [0-10]: ${NC}")" OPT
+        read -rp "$(echo -e "${YELLOW}Select [0-11]: ${NC}")" OPT
 
         case "$OPT" in
             1)
@@ -865,10 +1127,11 @@ main_menu() {
             6)
                 journalctl -u sing-box -n 60 --no-pager
                 pause ;;
-            7) do_update;    pause ;;
-            8) do_bbr;       pause ;;
-            9) do_uninstall; do_install; pause ;;
-           10) do_uninstall; pause ;;
+            7) do_update;          pause ;;
+            8) do_bbr;             pause ;;
+            9) do_vps_tools ;;
+           10) do_uninstall; do_install; pause ;;
+           11) do_uninstall; pause ;;
             0) exit 0 ;;
             *) echo -e "${RED}Invalid option.${NC}"; sleep 1 ;;
         esac
