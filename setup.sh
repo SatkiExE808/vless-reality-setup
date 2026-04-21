@@ -35,6 +35,11 @@ detect_ip() {
     [[ -z "$SERVER_IP" ]] && SERVER_IP=$(curl -s --max-time 5 https://api.ipify.org)
 }
 
+detect_main_ip() {
+    MAIN_IP=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[\d.]+')
+    [[ -z "$MAIN_IP" ]] && MAIN_IP=$(ip route get 8.8.8.8 2>/dev/null | grep -oP 'src \K[\d.]+')
+}
+
 # ── Install binary ─────────────────────────────────────────────────────────────
 
 install_binary() {
@@ -114,7 +119,7 @@ json_socks5() {
     {
       "type": "socks",
       "tag": "socks5",
-      "listen": "0.0.0.0",
+      "listen": "::",
       "listen_port": ${SOCKS_PORT},
       "users": [{ "username": "${SOCKS_USER}", "password": "${SOCKS_PASS}" }]
     }
@@ -124,7 +129,7 @@ EOF
     {
       "type": "socks",
       "tag": "socks5",
-      "listen": "0.0.0.0",
+      "listen": "::",
       "listen_port": ${SOCKS_PORT}
     }
 EOF
@@ -151,7 +156,11 @@ write_config() {
   "inbounds": [
 ${inbounds}
   ],
-  "outbounds": [{ "type": "direct", "tag": "direct" }],
+  "outbounds": [{
+    "type": "direct",
+    "tag": "direct",
+    "inet4_bind_address": "${MAIN_IP}"
+  }],
   "route": { "rules": [{ "action": "sniff" }], "final": "direct" }
 }
 EOF
@@ -315,6 +324,7 @@ do_install() {
     fi
 
     detect_ip
+    detect_main_ip
     install_binary
     mkdir -p "$CFG_DIR"
     echo -e "${YELLOW}▶ Generating credentials...${NC}"
@@ -349,6 +359,7 @@ SOCKS_PORT=${SOCKS_PORT:-1080}
 SOCKS_USER=${SOCKS_USER}
 SOCKS_PASS=${SOCKS_PASS}
 CERT_FP=${CERT_FP}
+MAIN_IP=${MAIN_IP}
 EOF
 
     write_service
