@@ -11,6 +11,7 @@ CFG_DIR="/etc/sing-box"
 CFG_FILE="$CFG_DIR/config.json"
 INFO_FILE="$CFG_DIR/.info"
 SERVICE="/etc/systemd/system/sing-box.service"
+SHORTCUT="/usr/local/bin/sb"
 SNI="www.microsoft.com"
 
 [[ $EUID -ne 0 ]] && echo -e "${RED}Run as root.${NC}" && exit 1
@@ -750,9 +751,23 @@ do_uninstall() {
     echo -e "${GREEN}✓ Uninstalled.${NC}"
 }
 
+# ── Shortcut ───────────────────────────────────────────────────────────────────
+
+install_shortcut() {
+    [[ -x "$SHORTCUT" ]] && return
+    cat > "$SHORTCUT" << 'EOF'
+#!/bin/bash
+bash <(curl -sL https://raw.githubusercontent.com/SatkiExE808/vless-reality-setup/main/setup.sh)
+EOF
+    chmod +x "$SHORTCUT"
+    echo -e "${GREEN}✓ Shortcut installed — type ${BOLD}sb${NC}${GREEN} anywhere to reopen this manager${NC}"
+    echo ""
+}
+
 # ── Main menu ──────────────────────────────────────────────────────────────────
 
 main_menu() {
+    install_shortcut
     while true; do
         header
 
