@@ -1080,7 +1080,101 @@ vps_node_quality() {
     bash <(curl -sL https://run.NodeQuality.com)
 }
 
+vps_fail2ban() {
+    header
+    echo -e " ${BOLD}Fail2Ban${NC}"
+    echo ""
 
+    local _installed=0
+    command -v fail2ban-client &>/dev/null && _installed=1
+
+    if [[ "$_installed" -eq 1 ]]; then
+        # ── Already installed: show status + manage ───────────────────
+        local _status
+        _status=$(systemctl is-active fail2ban 2>/dev/null)
+        echo -e "  Status : $([ "$_status" = "active" ] && echo "${GREEN}● running${NC}" || echo "${RED}● stopped${NC}")"
+        echo -e "  Version: $(fail2ban-client version 2>/dev/null | head -1)"
+        echo ""
+
+        if [[ "$_status" = "active" ]]; then
+            echo -e "  ${CYAN}Jails active:${NC}"
+            fail2ban-client status 2>/dev/null | grep "Jail list" | \
+                sed 's/.*Jail list:\s*//' | tr ',' '\n' | \
+                while read -r j; do
+                    j="${j// /}"
+                    [[ -z "$j" ]] && continue
+                    local _banned
+                    _banned=$(fail2ban-client status "$j" 2>/dev/null | \
+                              grep "Currently banned" | grep -oP '\d+')
+                    printf "    ${GREEN}%-20s${NC} banned: %s\n" "$j" "${_banned:-0}"
+                done
+            echo ""
+            echo -e "  ${CYAN}Recent bans (last 10):${NC}"
+            grep "Ban " /var/log/fail2ban.log 2>/dev/null | tail -10 | \
+                awk '{print "   ", $5, $6, $7}' || echo "   (no log entries)"
+        fi
+
+        echo ""
+        echo -e "  ${GREEN}1.${NC}  Restart fail2ban"
+        echo -e "  ${GREEN}2.${NC}  Stop fail2ban"
+        [[ "$_status" != "active" ]] && echo -e "  ${GREEN}3.${NC}  Start fail2ban"
+        echo -e "  ${RED}9.${NC}  Uninstall fail2ban"
+        echo -e "  ${RED}0.${NC}  Back"
+        echo ""
+        read -rp "$(echo -e "${YELLOW}Choice: ${NC}")" _FC
+        case "$_FC" in
+            1) systemctl restart fail2ban && echo -e "${GREEN}✓ Restarted.${NC}" ;;
+            2) systemctl stop    fail2ban && echo -e "${YELLOW}● Stopped.${NC}" ;;
+            3) systemctl start   fail2ban && echo -e "${GREEN}✓ Started.${NC}" ;;
+            9)
+                confirm "Uninstall fail2ban?" || return
+                systemctl stop    fail2ban 2>/dev/null
+                systemctl disable fail2ban 2>/dev/null
+                apt-get purge -y fail2ban 2>/dev/null
+                echo -e "${GREEN}✓ Fail2ban removed.${NC}"
+                ;;
+            0) return ;;
+        esac
+        return
+    fi
+
+    # ── Not installed: install ────────────────────────────────────────
+    echo -e "  fail2ban is ${RED}not installed${NC}."
+    echo ""
+    confirm "Install fail2ban now?" || return
+    echo ""
+
+    apt-get update -qq
+    apt-get install -y fail2ban
+
+    # Write a basic jail.local that protects SSH
+    cat > /etc/fail2ban/jail.local << 'EOF'
+[DEFAULT]
+bantime  = 3600
+findtime = 600
+maxretry = 5
+backend  = systemd
+
+[sshd]
+enabled  = true
+port     = ssh
+logpath  = %(sshd_log)s
+maxretry = 5
+EOF
+
+    systemctl enable --now fail2ban
+    sleep 1
+
+    if systemctl is-active --quiet fail2ban; then
+        echo ""
+        echo -e "${GREEN}✓ fail2ban installed and running.${NC}"
+        echo -e "  ${CYAN}SSH jail enabled — bans after 5 failed attempts (1h ban).${NC}"
+        echo -e "  ${CYAN}Config: /etc/fail2ban/jail.local${NC}"
+    else
+        echo -e "${RED}✗ fail2ban installed but failed to start.${NC}"
+        echo -e "  ${CYAN}Check: journalctl -u fail2ban${NC}"
+    fi
+}
 
 do_vps_tools() {
     while true; do
@@ -1093,10 +1187,11 @@ do_vps_tools() {
         echo -e "  ${GREEN}4.${NC}  Change DNS"
         echo -e "  ${GREEN}5.${NC}  Node Quality Check"
         echo -e "  ${GREEN}6.${NC}  System Update"
+        echo -e "  ${GREEN}7.${NC}  Fail2Ban"
         echo ""
         echo -e "  ${RED}0.${NC}  Back"
         echo ""
-        read -rp "$(echo -e "${YELLOW}Choice [0-6]: ${NC}")" _VT
+        read -rp "$(echo -e "${YELLOW}Choice [0-7]: ${NC}")" _VT
 
         case "$_VT" in
             1)  header; vps_check_ip;       pause ;;
@@ -1105,6 +1200,7 @@ do_vps_tools() {
             4)  vps_change_dns;             pause ;;
             5)  header; vps_node_quality;   pause ;;
             6)  header; vps_system_update;  pause ;;
+            7)  vps_fail2ban;               pause ;;
             0) return ;;
             *) echo -e "${RED}Invalid.${NC}"; sleep 1 ;;
         esac
