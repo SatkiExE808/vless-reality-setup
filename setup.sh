@@ -951,30 +951,56 @@ vps_change_dns() {
         *) echo -e "${RED}Invalid.${NC}"; return ;;
     esac
 
-    # Back up existing resolv.conf (follow symlink so we preserve content)
-    cp -L /etc/resolv.conf /etc/resolv.conf.bak 2>/dev/null
+    local _RESOLV="/etc/resolv.conf"
 
-    # On Ubuntu/Debian with systemd-resolved, /etc/resolv.conf is a symlink —
-    # remove it so we can write a real file
-    [[ -L /etc/resolv.conf ]] && rm /etc/resolv.conf
+    # Backup the current content (follow symlink so we get real data)
+    cp -L "$_RESOLV" "${_RESOLV}.bak" 2>/dev/null || true
 
-    # Remove immutable flag if set
-    chattr -i /etc/resolv.conf 2>/dev/null
+    # Remove immutable flag if previously set
+    chattr -i "$_RESOLV" 2>/dev/null || true
 
-    cat > /etc/resolv.conf << EOF
-nameserver ${_D1}
-nameserver ${_D2}
-EOF
+    # If it's a symlink (systemd-resolved stub), remove it so we can write a real file
+    [[ -L "$_RESOLV" ]] && rm -f "$_RESOLV"
+
+    # Write new DNS
+    printf "nameserver %s\nnameserver %s\n" "$_D1" "$_D2" > "$_RESOLV"
+
+    # Protect the file — prevents systemd-resolved / NetworkManager from overwriting it
+    chattr +i "$_RESOLV" 2>/dev/null || true
+
+    # If systemd-resolved is running, configure it too and disable its stub listener
+    # so it doesn't fight for control of /etc/resolv.conf
+    if systemctl is-active --quiet systemd-resolved 2>/dev/null; then
+        mkdir -p /etc/systemd/resolved.conf.d
+        printf "[Resolve]\nDNS=%s %s\nDNSStubListener=no\n" \
+            "$_D1" "$_D2" > /etc/systemd/resolved.conf.d/custom-dns.conf
+        systemctl restart systemd-resolved 2>/dev/null || true
+    fi
+
+    # If NetworkManager is running, tell it not to touch resolv.conf
+    if systemctl is-active --quiet NetworkManager 2>/dev/null; then
+        mkdir -p /etc/NetworkManager/conf.d
+        printf "[main]\ndns=none\n" > /etc/NetworkManager/conf.d/no-dns-override.conf
+        systemctl reload NetworkManager 2>/dev/null || true
+    fi
 
     echo -e "${GREEN}✓ DNS set to ${_D1} / ${_D2}${NC}"
-    echo -e "  ${CYAN}Backup saved to /etc/resolv.conf.bak${NC}"
+    echo -e "  ${CYAN}Backup: ${_RESOLV}.bak  |  File protected with chattr +i${NC}"
     echo ""
-    echo -e "${YELLOW}▶ Testing new DNS...${NC}"
-    if getent hosts google.com >/dev/null 2>&1; then
+    echo -e "${YELLOW}▶ Testing DNS resolution...${NC}"
+    local _ok=0
+    if command -v dig &>/dev/null; then
+        dig +short +time=5 "@$_D1" google.com A &>/dev/null && _ok=1
+    elif command -v nslookup &>/dev/null; then
+        nslookup google.com "$_D1" &>/dev/null && _ok=1
+    else
+        getent hosts google.com &>/dev/null && _ok=1
+    fi
+
+    if [[ "$_ok" -eq 1 ]]; then
         echo -e "${GREEN}✓ DNS resolution working.${NC}"
     else
-        echo -e "${RED}✗ Resolution failed — restoring backup.${NC}"
-        cp /etc/resolv.conf.bak /etc/resolv.conf
+        echo -e "${YELLOW}⚠ Could not verify — test manually: dig @${_D1} google.com${NC}"
     fi
 }
 
