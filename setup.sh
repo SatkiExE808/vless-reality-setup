@@ -994,6 +994,32 @@ vps_ip_quality() {
     echo -e "${CYAN}══════════════════════════════════════════════════${NC}"
 }
 
+vps_system_update() {
+    echo -e "${YELLOW}▶ Checking for system updates...${NC}"
+    echo ""
+    apt-get update -qq 2>/dev/null
+    local UPGRADABLE
+    UPGRADABLE=$(apt list --upgradable 2>/dev/null | grep -v "^Listing" | wc -l)
+
+    if [[ "$UPGRADABLE" -eq 0 ]]; then
+        echo -e "${GREEN}✓ System is up to date.${NC}"
+        return
+    fi
+
+    echo -e "  ${YELLOW}${UPGRADABLE} package(s) can be upgraded:${NC}"
+    echo ""
+    apt list --upgradable 2>/dev/null | grep -v "^Listing" | while read -r pkg; do
+        echo -e "  ${CYAN}·${NC} $pkg"
+    done
+    echo ""
+    if confirm "Install all updates now?"; then
+        echo ""
+        apt-get upgrade -y
+        echo ""
+        echo -e "${GREEN}✓ System updated.${NC}"
+    fi
+}
+
 vps_node_quality() {
     echo -e "${YELLOW}▶ Running Node Quality check...${NC}"
     echo -e "  ${CYAN}Press Ctrl+C to abort.${NC}"
@@ -1027,19 +1053,21 @@ do_vps_tools() {
         echo -e "  ${GREEN}5.${NC}  IP Quality Check"
         echo -e "  ${GREEN}6.${NC}  Run YABS Benchmark"
         echo -e "  ${GREEN}7.${NC}  Node Quality Check"
+        echo -e "  ${GREEN}8.${NC}  System Update"
         echo ""
         echo -e "  ${RED}0.${NC}  Back"
         echo ""
-        read -rp "$(echo -e "${YELLOW}Choice [0-7]: ${NC}")" _VT
+        read -rp "$(echo -e "${YELLOW}Choice [0-8]: ${NC}")" _VT
 
         case "$_VT" in
-            1) header; vps_check_ip;      pause ;;
-            2) header; vps_speedtest;     pause ;;
-            3) header; vps_check_dns;     pause ;;
-            4) vps_change_dns;            pause ;;
-            5) header; vps_ip_quality;    pause ;;
-            6) header; vps_yabs;          pause ;;
-            7) header; vps_node_quality;  pause ;;
+            1) header; vps_check_ip;       pause ;;
+            2) header; vps_speedtest;      pause ;;
+            3) header; vps_check_dns;      pause ;;
+            4) vps_change_dns;             pause ;;
+            5) header; vps_ip_quality;     pause ;;
+            6) header; vps_yabs;           pause ;;
+            7) header; vps_node_quality;   pause ;;
+            8) header; vps_system_update;  pause ;;
             0) return ;;
             *) echo -e "${RED}Invalid.${NC}"; sleep 1 ;;
         esac
