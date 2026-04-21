@@ -869,14 +869,40 @@ vps_speedtest() {
     fi
 }
 
+dns_provider() {
+    case "$1" in
+        8.8.8.8|8.8.4.4)                 echo "Google" ;;
+        1.1.1.1|1.0.0.1)                 echo "Cloudflare" ;;
+        208.67.222.222|208.67.220.220)   echo "OpenDNS" ;;
+        9.9.9.9|149.112.112.112)         echo "Quad9" ;;
+        94.140.14.14|94.140.15.15)       echo "AdGuard" ;;
+        8.26.56.26|8.20.247.20)          echo "Comodo" ;;
+        185.228.168.9|185.228.169.9)     echo "CleanBrowsing" ;;
+        77.88.8.8|77.88.8.1)            echo "Yandex" ;;
+        8.20.247.20|8.26.56.26)          echo "Comodo" ;;
+        76.76.19.19|76.223.122.150)      echo "Alternate DNS" ;;
+        127.0.0.53)                       echo "systemd-resolved (local stub)" ;;
+        127.0.0.1)                        echo "localhost" ;;
+        *)
+            local _ORG
+            _ORG=$(curl -s --max-time 5 \
+                "http://ip-api.com/json/${1}?fields=org,isp" 2>/dev/null \
+                | grep -oP '"org"\s*:\s*"\K[^"]+')
+            echo "${_ORG:-Unknown}"
+            ;;
+    esac
+}
+
 vps_check_dns() {
     echo ""
     echo -e "${CYAN}══════════════════════════════════════════════════${NC}"
     echo -e " ${BOLD}Current DNS Servers:${NC}"
     echo ""
-    grep "^nameserver" /etc/resolv.conf 2>/dev/null | while read -r _ ip; do
-        printf "  ${GREEN}%s${NC}\n" "$ip"
-    done
+    while read -r _ ip; do
+        local _PROV
+        _PROV=$(dns_provider "$ip")
+        printf "  ${GREEN}%-18s${NC} ${CYAN}%s${NC}\n" "$ip" "$_PROV"
+    done < <(grep "^nameserver" /etc/resolv.conf 2>/dev/null)
     echo ""
     echo -e " ${BOLD}Resolution Test:${NC}"
     echo ""
