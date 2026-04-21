@@ -955,15 +955,22 @@ vps_change_dns() {
     local _RESOLV="/etc/resolv.conf"
     local _methods=""
 
+    # ── 0. Tailscale ─────────────────────────────────────────────────
+    # Tailscale writes /etc/resolv.conf directly and overwrites everything.
+    # Must stop it before touching the file, then restart after protecting it.
+    local _ts_was_running=0
+    if systemctl is-active --quiet tailscaled 2>/dev/null; then
+        _ts_was_running=1
+        tailscale set --accept-dns=false 2>/dev/null || true
+        systemctl stop tailscaled 2>/dev/null
+        _methods+=" tailscale(stopped)"
+    fi
+
     # ── 1. systemd-resolved ──────────────────────────────────────────
-    # Configure upstream DNS and apply immediately via resolvectl.
-    # Do this FIRST so the stub at 127.0.0.53 forwards to the right server
-    # regardless of what /etc/resolv.conf contains.
     if systemctl is-active --quiet systemd-resolved 2>/dev/null; then
         mkdir -p /etc/systemd/resolved.conf.d
         printf "[Resolve]\nDNS=%s %s\n" "$_D1" "$_D2" \
             > /etc/systemd/resolved.conf.d/custom-dns.conf
-        # Apply immediately without restart using resolvectl on the default interface
         local _IF
         _IF=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'dev \K\S+')
         if [[ -n "$_IF" ]]; then
@@ -983,8 +990,6 @@ vps_change_dns() {
     fi
 
     # ── 3. resolvconf package ────────────────────────────────────────
-    # If resolvconf is installed it manages /etc/resolv.conf as a generated
-    # file — writing the target directly is overwritten. Write to its head file.
     if command -v resolvconf &>/dev/null; then
         mkdir -p /etc/resolvconf/resolv.conf.d
         printf "nameserver %s\nnameserver %s\n" "$_D1" "$_D2" \
@@ -994,29 +999,26 @@ vps_change_dns() {
     fi
 
     # ── 4. dhclient hook ─────────────────────────────────────────────
-    # Prevent DHCP lease renewal from overwriting our resolv.conf.
     if [[ -d /etc/dhcp ]]; then
         mkdir -p /etc/dhcp/dhclient-enter-hooks.d
-        printf '#!/bin/sh\n# Prevent dhclient from overwriting resolv.conf\nmake_resolv_conf() { : ; }\n' \
+        printf '#!/bin/sh\nmake_resolv_conf() { : ; }\n' \
             > /etc/dhcp/dhclient-enter-hooks.d/nodnsupdate
         chmod +x /etc/dhcp/dhclient-enter-hooks.d/nodnsupdate
     fi
 
     # ── 5. Direct /etc/resolv.conf write ────────────────────────────
-    # Backup first (follow symlink to capture real content)
     cp -L "$_RESOLV" "${_RESOLV}.bak" 2>/dev/null || true
-    # Remove symlink BEFORE chattr — chattr on a symlink targets the file it
-    # points to, not the symlink itself, so we'd remove immutability on the
-    # wrong file. Remove the link first, then operate on our new plain file.
-    [[ -L "$_RESOLV" ]] && rm -f "$_RESOLV"
-    # Now remove immutable flag from any pre-existing plain file
-    chattr -i "$_RESOLV" 2>/dev/null || true
-    # Write new DNS
+    [[ -L "$_RESOLV" ]] && rm -f "$_RESOLV"   # remove symlink BEFORE chattr
+    chattr -i "$_RESOLV" 2>/dev/null || true   # now safe: operates on plain file
     printf "nameserver %s\nnameserver %s\n" "$_D1" "$_D2" > "$_RESOLV"
-    # Protect — chattr +i fails silently on LXC/OpenVZ (overlayfs); that's
-    # acceptable since methods 1-4 above cover those environments.
-    chattr +i "$_RESOLV" 2>/dev/null || true
-    _methods+=" resolv.conf"
+    chattr +i "$_RESOLV" 2>/dev/null || true   # protect — Tailscale/dhclient can't overwrite
+    _methods+=" resolv.conf(+i)"
+
+    # ── Restart Tailscale (now it can't overwrite the protected file) ─
+    if [[ "$_ts_was_running" -eq 1 ]]; then
+        systemctl start tailscaled 2>/dev/null || true
+        _methods+="→restarted"
+    fi
 
     echo -e "${GREEN}✓ DNS changed to ${_D1} / ${_D2}${NC}"
     echo -e "  ${CYAN}Methods applied:${_methods}${NC}"
