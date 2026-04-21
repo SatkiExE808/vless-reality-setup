@@ -846,13 +846,26 @@ vps_speedtest() {
     echo -e "${CYAN}──────────────────────────────────────────────────${NC}"
     echo ""
 
+    # Auto-install speedtest-cli if not present
+    if ! command -v speedtest-cli &>/dev/null && ! command -v speedtest &>/dev/null; then
+        echo -e "${YELLOW}▶ Installing speedtest-cli...${NC}"
+        if apt-get install -y -qq speedtest-cli 2>/dev/null; then
+            echo -e "${GREEN}✓ Installed via apt${NC}"
+        elif command -v pip3 &>/dev/null && pip3 install speedtest-cli -q 2>/dev/null; then
+            echo -e "${GREEN}✓ Installed via pip3${NC}"
+        else
+            echo -e "${RED}✗ Could not install speedtest-cli.${NC}"
+            return
+        fi
+        echo ""
+    fi
+
+    echo -e "${YELLOW}▶ Running full speedtest (download + upload)...${NC}"
+    echo ""
     if command -v speedtest-cli &>/dev/null; then
-        confirm "Run speedtest-cli for upload speed too?" && echo "" && speedtest-cli --simple
-    elif command -v speedtest &>/dev/null; then
-        confirm "Run Ookla speedtest for upload speed too?" && echo "" && speedtest
+        speedtest-cli --simple
     else
-        echo -e "  ${CYAN}Tip: install speedtest-cli for upload testing${NC}"
-        echo -e "  ${CYAN}     pip3 install speedtest-cli${NC}"
+        speedtest
     fi
 }
 
