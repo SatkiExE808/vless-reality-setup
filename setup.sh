@@ -994,6 +994,13 @@ vps_ip_quality() {
     echo -e "${CYAN}══════════════════════════════════════════════════${NC}"
 }
 
+vps_node_quality() {
+    echo -e "${YELLOW}▶ Running Node Quality check...${NC}"
+    echo -e "  ${CYAN}Press Ctrl+C to abort.${NC}"
+    echo ""
+    bash <(curl -sL https://run.NodeQuality.com)
+}
+
 vps_yabs() {
     echo -e "${YELLOW}▶ Starting YABS benchmark...${NC}"
     echo -e "  ${CYAN}Includes: disk I/O, CPU, and network speed tests.${NC}"
@@ -1019,18 +1026,20 @@ do_vps_tools() {
         echo -e "  ${GREEN}4.${NC}  Change DNS"
         echo -e "  ${GREEN}5.${NC}  IP Quality Check"
         echo -e "  ${GREEN}6.${NC}  Run YABS Benchmark"
+        echo -e "  ${GREEN}7.${NC}  Node Quality Check"
         echo ""
         echo -e "  ${RED}0.${NC}  Back"
         echo ""
-        read -rp "$(echo -e "${YELLOW}Choice [0-6]: ${NC}")" _VT
+        read -rp "$(echo -e "${YELLOW}Choice [0-7]: ${NC}")" _VT
 
         case "$_VT" in
-            1) header; vps_check_ip;   pause ;;
-            2) header; vps_speedtest;  pause ;;
-            3) header; vps_check_dns;  pause ;;
-            4) vps_change_dns;         pause ;;
-            5) header; vps_ip_quality; pause ;;
-            6) header; vps_yabs;       pause ;;
+            1) header; vps_check_ip;      pause ;;
+            2) header; vps_speedtest;     pause ;;
+            3) header; vps_check_dns;     pause ;;
+            4) vps_change_dns;            pause ;;
+            5) header; vps_ip_quality;    pause ;;
+            6) header; vps_yabs;          pause ;;
+            7) header; vps_node_quality;  pause ;;
             0) return ;;
             *) echo -e "${RED}Invalid.${NC}"; sleep 1 ;;
         esac
