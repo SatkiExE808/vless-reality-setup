@@ -16,6 +16,10 @@ SNI="www.microsoft.com"
 
 [[ $EUID -ne 0 ]] && echo -e "${RED}Run as root.${NC}" && exit 1
 
+for _dep in curl openssl; do
+    command -v "$_dep" &>/dev/null || { echo -e "${RED}Missing dependency: $_dep${NC}"; exit 1; }
+done
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 header() {
@@ -27,9 +31,25 @@ header() {
     echo ""
 }
 
-confirm() { read -rp "$(echo -e "${YELLOW}$1 [y/N]: ${NC}")" r; [[ "$r" =~ ^[Yy]$ ]]; }
-pause()   { echo ""; read -rp "$(echo -e "${YELLOW}Press Enter to continue...${NC}")"; }
+confirm()      { read -rp "$(echo -e "${YELLOW}$1 [y/N]: ${NC}")" r; [[ "$r" =~ ^[Yy]$ ]]; }
+pause()        { echo ""; read -rp "$(echo -e "${YELLOW}Press Enter to continue...${NC}")"; }
 is_installed() { [[ -x "$BIN" && -f "$CFG_FILE" ]]; }
+
+validate_port() { [[ "$1" =~ ^[0-9]+$ ]] && (( $1 >= 1 && $1 <= 65535 )); }
+
+read_port() {
+    # read_port "Label" default VARNAME
+    local _label="$1" _def="$2"
+    while true; do
+        read -rp "$(echo -e "${YELLOW}${_label} port [default: ${_def}]: ${NC}")" _pt
+        _pt=${_pt:-$_def}
+        if validate_port "$_pt"; then
+            printf -v "$3" '%s' "$_pt"
+            return
+        fi
+        echo -e "${RED}  Invalid — enter a number between 1 and 65535.${NC}"
+    done
+}
 
 detect_main_ip() {
     MAIN_IP=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[\d.]+')
@@ -37,10 +57,8 @@ detect_main_ip() {
 }
 
 detect_ip() {
-    # Use main interface IP first (not affected by VPN routing)
     detect_main_ip
     SERVER_IP="$MAIN_IP"
-    # Validate it's a public IP; fall back to ipify if it looks private
     case "$SERVER_IP" in
         10.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*|192.168.*|100.*)
             SERVER_IP=$(curl -s4 --max-time 5 https://api.ipify.org 2>/dev/null)
@@ -57,13 +75,15 @@ install_binary() {
         return
     fi
     echo -e "${YELLOW}▶ Fetching latest sing-box...${NC}"
+    local LATEST VER ARCH URL
     LATEST=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest \
         | grep '"tag_name"' | cut -d'"' -f4)
+    [[ -z "$LATEST" ]] && echo -e "${RED}Failed to fetch release info.${NC}" && return 1
     VER=${LATEST#v}
     ARCH=$(uname -m); [[ "$ARCH" == "aarch64" ]] && ARCH="arm64" || ARCH="amd64"
     URL="https://github.com/SagerNet/sing-box/releases/download/${LATEST}/sing-box-${VER}-linux-${ARCH}.tar.gz"
-    curl -sL "$URL" -o /tmp/sb.tar.gz
-    tar -xzf /tmp/sb.tar.gz -C /tmp/
+    curl -sL "$URL" -o /tmp/sb.tar.gz || { echo -e "${RED}Download failed.${NC}"; return 1; }
+    tar -xzf /tmp/sb.tar.gz -C /tmp/ || { echo -e "${RED}Extract failed.${NC}"; rm -f /tmp/sb.tar.gz; return 1; }
     mv /tmp/sing-box-${VER}-linux-${ARCH}/sing-box "$BIN"
     chmod +x "$BIN"
     rm -rf /tmp/sb.tar.gz /tmp/sing-box-${VER}-linux-${ARCH}
@@ -78,6 +98,21 @@ gen_cert() {
         -days 36500 -nodes -subj "/CN=${SNI}" 2>/dev/null
     CERT_FP=$(openssl x509 -noout -fingerprint -sha256 -in "$CFG_DIR/cert.pem" \
         | sed 's/.*=//;s/://g' | tr '[:upper:]' '[:lower:]')
+}
+
+# Read fingerprint from existing cert without regenerating
+read_cert_fp() {
+    CERT_FP=$(openssl x509 -noout -fingerprint -sha256 -in "$CFG_DIR/cert.pem" 2>/dev/null \
+        | sed 's/.*=//;s/://g' | tr '[:upper:]' '[:lower:]')
+}
+
+# Only generate cert if one does not exist; otherwise just read its fingerprint
+ensure_cert() {
+    if [[ -f "$CFG_DIR/cert.pem" ]]; then
+        read_cert_fp
+    else
+        gen_cert
+    fi
 }
 
 # ── Inbound JSON builders ──────────────────────────────────────────────────────
@@ -196,17 +231,21 @@ write_config() {
         inbounds+="${parts[$i]}"
     done
 
+    # Only bind to MAIN_IP if detection succeeded
+    local OUTBOUND
+    if [[ -n "$MAIN_IP" ]]; then
+        OUTBOUND="{\"type\":\"direct\",\"tag\":\"direct\",\"inet4_bind_address\":\"${MAIN_IP}\"}"
+    else
+        OUTBOUND="{\"type\":\"direct\",\"tag\":\"direct\"}"
+    fi
+
     cat > "$CFG_FILE" << EOF
 {
   "log": { "level": "warn", "timestamp": true },
   "inbounds": [
 ${inbounds}
   ],
-  "outbounds": [{
-    "type": "direct",
-    "tag": "direct",
-    "inet4_bind_address": "${MAIN_IP}"
-  }],
+  "outbounds": [${OUTBOUND}],
   "route": { "rules": [{ "action": "sniff" }], "final": "direct" }
 }
 EOF
@@ -255,7 +294,6 @@ show_info() {
     [[ ! -f "$INFO_FILE" ]] && echo -e "${RED}Not installed.${NC}" && return
     # shellcheck source=/dev/null
     source "$INFO_FILE"
-    # SERVER_IP is saved at install time; fall back to live detection only if missing
     [[ -z "$SERVER_IP" ]] && detect_ip
 
     header
@@ -293,20 +331,6 @@ show_info() {
         show_qr "$HY2_LINK"
     fi
 
-    if [[ $ENABLE_SOCKS5 == true ]]; then
-        echo ""
-        echo -e " ${BOLD}${BLUE}◆ SOCKS5${NC}"
-        echo -e "${CYAN}──────────────────────────────────────────────────${NC}"
-        printf "  %-12s ${GREEN}%s${NC}\n" "Address:"  "$SERVER_IP"
-        printf "  %-12s ${GREEN}%s${NC}\n" "Port:"     "$SOCKS_PORT"
-        if [[ -n "$SOCKS_USER" ]]; then
-            printf "  %-12s ${GREEN}%s${NC}\n" "Username:" "$SOCKS_USER"
-            printf "  %-12s ${GREEN}%s${NC}\n" "Password:" "$SOCKS_PASS"
-        else
-            printf "  %-12s ${GREEN}%s${NC}\n" "Auth:"     "none"
-        fi
-    fi
-
     if [[ $ENABLE_VMESS == true ]]; then
         local VMESS_JSON="{\"v\":\"2\",\"ps\":\"VMess-${SERVER_IP}\",\"add\":\"${SERVER_IP}\",\"port\":${VMESS_PORT},\"id\":\"${VMESS_UUID}\",\"aid\":0,\"net\":\"ws\",\"type\":\"none\",\"host\":\"\",\"path\":\"/${VMESS_PATH}\",\"tls\":\"\"}"
         VMESS_LINK="vmess://$(echo -n "$VMESS_JSON" | base64 -w 0)"
@@ -330,20 +354,35 @@ show_info() {
         echo ""
         echo -e " ${BOLD}${PURPLE}◆ TUIC v5${NC}"
         echo -e "${CYAN}──────────────────────────────────────────────────${NC}"
-        printf "  %-12s ${GREEN}%s${NC}\n" "Address:"   "$SERVER_IP"
-        printf "  %-12s ${GREEN}%s${NC}\n" "Port:"      "$TUIC_PORT"
-        printf "  %-12s ${GREEN}%s${NC}\n" "UUID:"      "$TUIC_UUID"
-        printf "  %-12s ${GREEN}%s${NC}\n" "Password:"  "$TUIC_PASS"
+        printf "  %-12s ${GREEN}%s${NC}\n" "Address:"    "$SERVER_IP"
+        printf "  %-12s ${GREEN}%s${NC}\n" "Port:"       "$TUIC_PORT"
+        printf "  %-12s ${GREEN}%s${NC}\n" "UUID:"       "$TUIC_UUID"
+        printf "  %-12s ${GREEN}%s${NC}\n" "Password:"   "$TUIC_PASS"
         printf "  %-12s ${GREEN}%s${NC}\n" "Congestion:" "bbr"
-        printf "  %-12s ${GREEN}%s${NC}\n" "TLS:"       "self-signed (insecure=1)"
+        printf "  %-12s ${GREEN}%s${NC}\n" "TLS:"        "self-signed (insecure=1)"
         echo ""
         echo -e "  ${YELLOW}▶ Import Link:${NC}"
         echo -e "  ${TUIC_LINK}"
         show_qr "$TUIC_LINK"
     fi
 
+    if [[ $ENABLE_SOCKS5 == true ]]; then
+        echo ""
+        echo -e " ${BOLD}${BLUE}◆ SOCKS5${NC}"
+        echo -e "${CYAN}──────────────────────────────────────────────────${NC}"
+        printf "  %-12s ${GREEN}%s${NC}\n" "Address:"  "$SERVER_IP"
+        printf "  %-12s ${GREEN}%s${NC}\n" "Port:"     "$SOCKS_PORT"
+        if [[ -n "$SOCKS_USER" ]]; then
+            printf "  %-12s ${GREEN}%s${NC}\n" "Username:" "$SOCKS_USER"
+            printf "  %-12s ${GREEN}%s${NC}\n" "Password:" "$SOCKS_PASS"
+        else
+            printf "  %-12s ${GREEN}%s${NC}\n" "Auth:"     "none"
+        fi
+    fi
+
     echo ""
     echo -e "${CYAN}══════════════════════════════════════════════════${NC}"
+    local SB_STATUS SB_VER
     SB_STATUS=$(systemctl is-active sing-box 2>/dev/null)
     SB_VER=$("$BIN" version 2>/dev/null | grep -oP '[\d]+\.[\d]+\.[\d]+' | head -1)
     [[ "$SB_STATUS" == "active" ]] \
@@ -381,6 +420,7 @@ TUIC_PASS=${TUIC_PASS}
 CERT_FP=${CERT_FP}
 MAIN_IP=${MAIN_IP}
 EOF
+    chmod 600 "$INFO_FILE"
 }
 
 # ── Install flow ───────────────────────────────────────────────────────────────
@@ -399,11 +439,8 @@ do_install() {
     read -rp "$(echo -e "${YELLOW}Choice [1-6, default 1]: ${NC}")" PC
     PC=${PC:-1}
 
-    ENABLE_REALITY=false
-    ENABLE_HY2=false
-    ENABLE_SOCKS5=false
-    ENABLE_VMESS=false
-    ENABLE_TUIC=false
+    ENABLE_REALITY=false; ENABLE_HY2=false; ENABLE_SOCKS5=false
+    ENABLE_VMESS=false;   ENABLE_TUIC=false
 
     case "$PC" in
         1) ENABLE_REALITY=true ;;
@@ -416,44 +453,30 @@ do_install() {
     esac
 
     echo ""
-    if [[ $ENABLE_REALITY == true ]]; then
-        read -rp "$(echo -e "${YELLOW}VLESS port [default: 443]: ${NC}")" VLESS_PORT
-        VLESS_PORT=${VLESS_PORT:-443}
-    fi
-    if [[ $ENABLE_HY2 == true ]]; then
-        read -rp "$(echo -e "${YELLOW}Hysteria2 port [default: 8443]: ${NC}")" HY2_PORT
-        HY2_PORT=${HY2_PORT:-8443}
-    fi
+    [[ $ENABLE_REALITY == true ]] && read_port "VLESS"    443  VLESS_PORT
+    [[ $ENABLE_HY2     == true ]] && read_port "Hysteria2" 8443 HY2_PORT
+    [[ $ENABLE_VMESS   == true ]] && read_port "VMess+WS"  8080 VMESS_PORT
+    [[ $ENABLE_TUIC    == true ]] && read_port "TUIC"      8853 TUIC_PORT
     if [[ $ENABLE_SOCKS5 == true ]]; then
-        read -rp "$(echo -e "${YELLOW}SOCKS5 port [default: 1080]: ${NC}")" SOCKS_PORT
-        SOCKS_PORT=${SOCKS_PORT:-1080}
+        read_port "SOCKS5" 1080 SOCKS_PORT
         read -rp "$(echo -e "${YELLOW}Add authentication? [y/N]: ${NC}")" SOCKS_AUTH
         if [[ "$SOCKS_AUTH" =~ ^[Yy]$ ]]; then
             SOCKS_USER="user$(openssl rand -hex 3)"
             SOCKS_PASS=$(openssl rand -hex 8)
             echo -e "  Generated → ${GREEN}${SOCKS_USER}${NC} / ${GREEN}${SOCKS_PASS}${NC}"
         else
-            SOCKS_USER=""
-            SOCKS_PASS=""
+            SOCKS_USER=""; SOCKS_PASS=""
         fi
-    fi
-    if [[ $ENABLE_VMESS == true ]]; then
-        read -rp "$(echo -e "${YELLOW}VMess+WS port [default: 8080]: ${NC}")" VMESS_PORT
-        VMESS_PORT=${VMESS_PORT:-8080}
-    fi
-    if [[ $ENABLE_TUIC == true ]]; then
-        read -rp "$(echo -e "${YELLOW}TUIC port [default: 8853]: ${NC}")" TUIC_PORT
-        TUIC_PORT=${TUIC_PORT:-8853}
     fi
 
     detect_ip
-    detect_main_ip
     echo ""
     echo -e "  Auto-detected IP : ${GREEN}${SERVER_IP}${NC}"
     echo -e "  ${CYAN}(On NAT VPS the detected IP may differ from the IP clients connect to)${NC}"
     read -rp "$(echo -e "${YELLOW}Server IP [${SERVER_IP}]: ${NC}")" INPUT_IP
     [[ -n "$INPUT_IP" ]] && SERVER_IP="$INPUT_IP"
-    install_binary
+
+    install_binary || return 1
     mkdir -p "$CFG_DIR"
     echo -e "${YELLOW}▶ Generating credentials...${NC}"
 
@@ -473,7 +496,10 @@ do_install() {
 
     write_config
 
-    "$BIN" check -c "$CFG_FILE" || { echo -e "${RED}Config check failed.${NC}"; exit 1; }
+    if ! "$BIN" check -c "$CFG_FILE" 2>&1; then
+        echo -e "${RED}Config check failed — please report this issue.${NC}"
+        return 1
+    fi
     echo -e "${GREEN}✓ Config valid${NC}"
 
     write_info
@@ -482,8 +508,8 @@ do_install() {
     if systemctl is-active --quiet sing-box; then
         echo -e "${GREEN}✓ sing-box is running${NC}"
     else
-        echo -e "${RED}✗ Failed to start. Run: journalctl -u sing-box -n 30${NC}"
-        exit 1
+        echo -e "${RED}✗ Failed to start. Check: journalctl -u sing-box -n 30${NC}"
+        return 1
     fi
 
     show_info
@@ -499,16 +525,16 @@ do_add_protocol() {
     echo -e " ${BOLD}Add a protocol:${NC}"
     echo ""
 
-    # Show already-active protocols (greyed out, no number)
+    # Active protocols — shown in main menu order
     local ANY_ACTIVE=false
-    [[ $ENABLE_REALITY == true ]] && echo -e "  ${CYAN}✓  VLESS Reality${NC}" && ANY_ACTIVE=true
-    [[ $ENABLE_HY2     == true ]] && echo -e "  ${CYAN}✓  Hysteria2${NC}"     && ANY_ACTIVE=true
-    [[ $ENABLE_SOCKS5  == true ]] && echo -e "  ${CYAN}✓  SOCKS5${NC}"        && ANY_ACTIVE=true
-    [[ $ENABLE_VMESS   == true ]] && echo -e "  ${CYAN}✓  VMess + WebSocket${NC}" && ANY_ACTIVE=true
-    [[ $ENABLE_TUIC    == true ]] && echo -e "  ${CYAN}✓  TUIC${NC}"          && ANY_ACTIVE=true
+    [[ $ENABLE_REALITY == true ]] && echo -e "  ${CYAN}✓  VLESS Reality${NC}"      && ANY_ACTIVE=true
+    [[ $ENABLE_HY2     == true ]] && echo -e "  ${CYAN}✓  Hysteria2${NC}"          && ANY_ACTIVE=true
+    [[ $ENABLE_VMESS   == true ]] && echo -e "  ${CYAN}✓  VMess + WebSocket${NC}"  && ANY_ACTIVE=true
+    [[ $ENABLE_TUIC    == true ]] && echo -e "  ${CYAN}✓  TUIC${NC}"               && ANY_ACTIVE=true
+    [[ $ENABLE_SOCKS5  == true ]] && echo -e "  ${CYAN}✓  SOCKS5${NC}"             && ANY_ACTIVE=true
     [[ $ANY_ACTIVE == true ]] && echo ""
 
-    # Build list of protocols available to add
+    # Available protocols — in same order
     local -a _NAMES _DESCS _IDS
     [[ $ENABLE_REALITY != true ]] && _NAMES+=("VLESS Reality")     && _DESCS+=("TCP · most secure") && _IDS+=("reality")
     [[ $ENABLE_HY2     != true ]] && _NAMES+=("Hysteria2")         && _DESCS+=("UDP · fast")        && _IDS+=("hy2")
@@ -538,8 +564,7 @@ do_add_protocol() {
 
     case "$_SEL" in
         reality)
-            read -rp "$(echo -e "${YELLOW}VLESS port [default: 443]: ${NC}")" VLESS_PORT
-            VLESS_PORT=${VLESS_PORT:-443}
+            read_port "VLESS" 443 VLESS_PORT
             KEYPAIR=$("$BIN" generate reality-keypair)
             UUID=$("$BIN" generate uuid)
             PRIVATE_KEY=$(echo "$KEYPAIR" | awk '/PrivateKey/{print $2}')
@@ -547,14 +572,12 @@ do_add_protocol() {
             SHORT_ID=$(openssl rand -hex 8)
             ENABLE_REALITY=true ;;
         hy2)
-            read -rp "$(echo -e "${YELLOW}Hysteria2 port [default: 8443]: ${NC}")" HY2_PORT
-            HY2_PORT=${HY2_PORT:-8443}
+            read_port "Hysteria2" 8443 HY2_PORT
             HY2_PASS=$(openssl rand -hex 16)
-            gen_cert
+            ensure_cert
             ENABLE_HY2=true ;;
         socks5)
-            read -rp "$(echo -e "${YELLOW}SOCKS5 port [default: 1080]: ${NC}")" SOCKS_PORT
-            SOCKS_PORT=${SOCKS_PORT:-1080}
+            read_port "SOCKS5" 1080 SOCKS_PORT
             read -rp "$(echo -e "${YELLOW}Add authentication? [y/N]: ${NC}")" SOCKS_AUTH
             if [[ "$SOCKS_AUTH" =~ ^[Yy]$ ]]; then
                 SOCKS_USER="user$(openssl rand -hex 3)"
@@ -565,23 +588,23 @@ do_add_protocol() {
             fi
             ENABLE_SOCKS5=true ;;
         vmess)
-            read -rp "$(echo -e "${YELLOW}VMess+WS port [default: 8080]: ${NC}")" VMESS_PORT
-            VMESS_PORT=${VMESS_PORT:-8080}
+            read_port "VMess+WS" 8080 VMESS_PORT
             VMESS_UUID=$("$BIN" generate uuid)
             VMESS_PATH=$(openssl rand -hex 4)
             ENABLE_VMESS=true ;;
         tuic)
-            read -rp "$(echo -e "${YELLOW}TUIC port [default: 8853]: ${NC}")" TUIC_PORT
-            TUIC_PORT=${TUIC_PORT:-8853}
+            read_port "TUIC" 8853 TUIC_PORT
             TUIC_UUID=$("$BIN" generate uuid)
             TUIC_PASS=$(openssl rand -hex 16)
-            gen_cert
+            ensure_cert
             ENABLE_TUIC=true ;;
     esac
 
     detect_main_ip
     write_config
-    "$BIN" check -c "$CFG_FILE" || { echo -e "${RED}Config invalid.${NC}"; return; }
+    if ! "$BIN" check -c "$CFG_FILE" 2>&1; then
+        echo -e "${RED}Config invalid.${NC}"; return
+    fi
 
     write_info
     systemctl restart sing-box
@@ -594,7 +617,6 @@ do_delete_protocol() {
     [[ ! -f "$INFO_FILE" ]] && echo -e "${RED}Not installed.${NC}" && return
     source "$INFO_FILE"
 
-    # Count active protocols
     local COUNT=0
     [[ $ENABLE_REALITY == true ]] && ((COUNT++))
     [[ $ENABLE_HY2     == true ]] && ((COUNT++))
@@ -607,7 +629,6 @@ do_delete_protocol() {
         return
     fi
 
-    # Build list of active protocols with sequential numbers
     local -a _NAMES _IDS
     [[ $ENABLE_REALITY == true ]] && _NAMES+=("VLESS Reality")     && _IDS+=("reality")
     [[ $ENABLE_HY2     == true ]] && _NAMES+=("Hysteria2")         && _IDS+=("hy2")
@@ -647,7 +668,9 @@ do_delete_protocol() {
 
     detect_main_ip
     write_config
-    "$BIN" check -c "$CFG_FILE" || { echo -e "${RED}Config invalid.${NC}"; return; }
+    if ! "$BIN" check -c "$CFG_FILE" 2>&1; then
+        echo -e "${RED}Config invalid.${NC}"; return
+    fi
 
     write_info
     systemctl restart sing-box
@@ -661,8 +684,10 @@ do_delete_protocol() {
 do_update() {
     header
     echo -e "${YELLOW}▶ Checking for updates...${NC}"
+    local LATEST LATEST_VER CURRENT ARCH URL
     LATEST=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest \
         | grep '"tag_name"' | cut -d'"' -f4)
+    [[ -z "$LATEST" ]] && echo -e "${RED}Failed to fetch version info.${NC}" && return
     LATEST_VER=${LATEST#v}
     CURRENT=$("$BIN" version 2>/dev/null | grep -oP '[\d]+\.[\d]+\.[\d]+' | head -1)
 
@@ -672,16 +697,30 @@ do_update() {
     fi
 
     echo -e "Updating ${RED}${CURRENT}${NC} → ${GREEN}${LATEST_VER}${NC}"
-    systemctl stop sing-box
     ARCH=$(uname -m); [[ "$ARCH" == "aarch64" ]] && ARCH="arm64" || ARCH="amd64"
     URL="https://github.com/SagerNet/sing-box/releases/download/${LATEST}/sing-box-${LATEST_VER}-linux-${ARCH}.tar.gz"
-    curl -sL "$URL" -o /tmp/sb.tar.gz
-    tar -xzf /tmp/sb.tar.gz -C /tmp/
-    mv /tmp/sing-box-${LATEST_VER}-linux-${ARCH}/sing-box "$BIN"
-    chmod +x "$BIN"
-    rm -rf /tmp/sb.tar.gz /tmp/sing-box-${LATEST_VER}-linux-${ARCH}
-    systemctl start sing-box
-    echo -e "${GREEN}✓ Updated to $($BIN version | grep -oP '[\d]+\.[\d]+\.[\d]+' | head -1)${NC}"
+
+    curl -sL "$URL" -o /tmp/sb.tar.gz \
+        || { echo -e "${RED}Download failed.${NC}"; return; }
+    tar -xzf /tmp/sb.tar.gz -C /tmp/ \
+        || { echo -e "${RED}Extract failed.${NC}"; rm -f /tmp/sb.tar.gz; return; }
+
+    cp "$BIN" "${BIN}.bak" 2>/dev/null
+    systemctl stop sing-box
+
+    if mv /tmp/sing-box-${LATEST_VER}-linux-${ARCH}/sing-box "$BIN"; then
+        chmod +x "$BIN"
+        rm -f "${BIN}.bak" /tmp/sb.tar.gz
+        rm -rf /tmp/sing-box-${LATEST_VER}-linux-${ARCH}
+        systemctl start sing-box
+        echo -e "${GREEN}✓ Updated to $($BIN version | grep -oP '[\d]+\.[\d]+\.[\d]+' | head -1)${NC}"
+    else
+        mv "${BIN}.bak" "$BIN" 2>/dev/null
+        rm -f /tmp/sb.tar.gz
+        rm -rf /tmp/sing-box-${LATEST_VER}-linux-${ARCH}
+        systemctl start sing-box
+        echo -e "${RED}✗ Update failed — restored previous version.${NC}"
+    fi
 }
 
 # ── BBR ───────────────────────────────────────────────────────────────────────
@@ -697,7 +736,7 @@ do_bbr() {
 
     if [[ "$CC" == "bbr" ]]; then
         echo -e "  Status    : ${GREEN}● enabled${NC}"
-        printf "  %-10s ${GREEN}%s${NC}\n" "Qdisc:"  "$QDISC"
+        printf "  %-10s ${GREEN}%s${NC}\n" "Qdisc:"   "$QDISC"
         echo ""
         echo -e "  ${GREEN}1.${NC}  Disable BBR  (revert to cubic)"
     else
@@ -725,8 +764,8 @@ do_bbr() {
                     echo -e "${RED}✗ BBR is not supported by this kernel.${NC}"
                     return
                 fi
-                sysctl -w net.core.default_qdisc=fq              >/dev/null
-                sysctl -w net.ipv4.tcp_congestion_control=bbr     >/dev/null
+                sysctl -w net.core.default_qdisc=fq          >/dev/null
+                sysctl -w net.ipv4.tcp_congestion_control=bbr >/dev/null
                 cat > /etc/sysctl.d/99-bbr.conf << 'SYSCTL'
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
@@ -743,7 +782,7 @@ do_uninstall() {
     header
     echo -e "${RED}This will completely remove sing-box.${NC}"
     confirm "Continue?" || { echo "Cancelled."; return; }
-    systemctl stop sing-box 2>/dev/null
+    systemctl stop    sing-box 2>/dev/null
     systemctl disable sing-box 2>/dev/null
     rm -f "$SERVICE" "$BIN"
     rm -rf "$CFG_DIR"
@@ -772,6 +811,7 @@ main_menu() {
         header
 
         if is_installed; then
+            local SB_STATUS SB_VER
             SB_STATUS=$(systemctl is-active sing-box 2>/dev/null)
             SB_VER=$("$BIN" version 2>/dev/null | grep -oP '[\d]+\.[\d]+\.[\d]+' | head -1)
             [[ "$SB_STATUS" == "active" ]] \
@@ -825,8 +865,8 @@ main_menu() {
             6)
                 journalctl -u sing-box -n 60 --no-pager
                 pause ;;
-            7) do_update; pause ;;
-            8) do_bbr;    pause ;;
+            7) do_update;    pause ;;
+            8) do_bbr;       pause ;;
             9) do_uninstall; do_install; pause ;;
            10) do_uninstall; pause ;;
             0) exit 0 ;;
