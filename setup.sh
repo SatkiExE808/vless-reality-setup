@@ -497,22 +497,44 @@ do_add_protocol() {
     header
     echo -e " ${BOLD}Add a protocol:${NC}"
     echo ""
-    [[ $ENABLE_REALITY == true ]] && echo -e "  ${CYAN}·${NC} VLESS Reality       (already active)" \
-                                  || echo -e "  ${GREEN}1.${NC} VLESS Reality"
-    [[ $ENABLE_HY2     == true ]] && echo -e "  ${CYAN}·${NC} Hysteria2           (already active)" \
-                                  || echo -e "  ${GREEN}2.${NC} Hysteria2"
-    [[ $ENABLE_SOCKS5  == true ]] && echo -e "  ${CYAN}·${NC} SOCKS5              (already active)" \
-                                  || echo -e "  ${GREEN}3.${NC} SOCKS5"
-    [[ $ENABLE_VMESS   == true ]] && echo -e "  ${CYAN}·${NC} VMess + WebSocket   (already active)" \
-                                  || echo -e "  ${GREEN}4.${NC} VMess + WebSocket"
-    [[ $ENABLE_TUIC    == true ]] && echo -e "  ${CYAN}·${NC} TUIC                (already active)" \
-                                  || echo -e "  ${GREEN}5.${NC} TUIC"
-    echo ""
-    read -rp "$(echo -e "${YELLOW}Choice: ${NC}")" ADD_CHOICE
 
-    case "$ADD_CHOICE" in
-        1)
-            [[ $ENABLE_REALITY == true ]] && echo -e "${YELLOW}Already active.${NC}" && return
+    # Show already-active protocols (greyed out, no number)
+    local ANY_ACTIVE=false
+    [[ $ENABLE_REALITY == true ]] && echo -e "  ${CYAN}✓  VLESS Reality${NC}" && ANY_ACTIVE=true
+    [[ $ENABLE_HY2     == true ]] && echo -e "  ${CYAN}✓  Hysteria2${NC}"     && ANY_ACTIVE=true
+    [[ $ENABLE_SOCKS5  == true ]] && echo -e "  ${CYAN}✓  SOCKS5${NC}"        && ANY_ACTIVE=true
+    [[ $ENABLE_VMESS   == true ]] && echo -e "  ${CYAN}✓  VMess + WebSocket${NC}" && ANY_ACTIVE=true
+    [[ $ENABLE_TUIC    == true ]] && echo -e "  ${CYAN}✓  TUIC${NC}"          && ANY_ACTIVE=true
+    [[ $ANY_ACTIVE == true ]] && echo ""
+
+    # Build list of protocols available to add
+    local -a _NAMES _DESCS _IDS
+    [[ $ENABLE_REALITY != true ]] && _NAMES+=("VLESS Reality")     && _DESCS+=("TCP · most secure") && _IDS+=("reality")
+    [[ $ENABLE_HY2     != true ]] && _NAMES+=("Hysteria2")         && _DESCS+=("UDP · fast")        && _IDS+=("hy2")
+    [[ $ENABLE_SOCKS5  != true ]] && _NAMES+=("SOCKS5")            && _DESCS+=("TCP · simple")      && _IDS+=("socks5")
+    [[ $ENABLE_VMESS   != true ]] && _NAMES+=("VMess + WebSocket") && _DESCS+=("TCP · compatible")  && _IDS+=("vmess")
+    [[ $ENABLE_TUIC    != true ]] && _NAMES+=("TUIC")              && _DESCS+=("UDP · fast · QUIC") && _IDS+=("tuic")
+
+    if [[ ${#_NAMES[@]} -eq 0 ]]; then
+        echo -e "  ${YELLOW}All protocols are already active.${NC}"
+        return
+    fi
+
+    for i in "${!_NAMES[@]}"; do
+        printf "  ${GREEN}%d.${NC}  %-22s ${CYAN}(%s)${NC}\n" $((i+1)) "${_NAMES[$i]}" "${_DESCS[$i]}"
+    done
+
+    echo ""
+    read -rp "$(echo -e "${YELLOW}Choice [1-${#_NAMES[@]}]: ${NC}")" ADD_CHOICE
+
+    if ! [[ "$ADD_CHOICE" =~ ^[0-9]+$ ]] || (( ADD_CHOICE < 1 || ADD_CHOICE > ${#_NAMES[@]} )); then
+        echo -e "${RED}Invalid.${NC}"; return
+    fi
+
+    local _SEL="${_IDS[$((ADD_CHOICE-1))]}"
+
+    case "$_SEL" in
+        reality)
             read -rp "$(echo -e "${YELLOW}VLESS port [default: 443]: ${NC}")" VLESS_PORT
             VLESS_PORT=${VLESS_PORT:-443}
             KEYPAIR=$("$BIN" generate reality-keypair)
@@ -521,15 +543,13 @@ do_add_protocol() {
             PUBLIC_KEY=$(echo  "$KEYPAIR" | awk '/PublicKey/{print $2}')
             SHORT_ID=$(openssl rand -hex 8)
             ENABLE_REALITY=true ;;
-        2)
-            [[ $ENABLE_HY2 == true ]] && echo -e "${YELLOW}Already active.${NC}" && return
+        hy2)
             read -rp "$(echo -e "${YELLOW}Hysteria2 port [default: 8443]: ${NC}")" HY2_PORT
             HY2_PORT=${HY2_PORT:-8443}
             HY2_PASS=$(openssl rand -hex 16)
             gen_cert
             ENABLE_HY2=true ;;
-        3)
-            [[ $ENABLE_SOCKS5 == true ]] && echo -e "${YELLOW}Already active.${NC}" && return
+        socks5)
             read -rp "$(echo -e "${YELLOW}SOCKS5 port [default: 1080]: ${NC}")" SOCKS_PORT
             SOCKS_PORT=${SOCKS_PORT:-1080}
             read -rp "$(echo -e "${YELLOW}Add authentication? [y/N]: ${NC}")" SOCKS_AUTH
@@ -541,22 +561,19 @@ do_add_protocol() {
                 SOCKS_USER=""; SOCKS_PASS=""
             fi
             ENABLE_SOCKS5=true ;;
-        4)
-            [[ $ENABLE_VMESS == true ]] && echo -e "${YELLOW}Already active.${NC}" && return
+        vmess)
             read -rp "$(echo -e "${YELLOW}VMess+WS port [default: 8080]: ${NC}")" VMESS_PORT
             VMESS_PORT=${VMESS_PORT:-8080}
             VMESS_UUID=$("$BIN" generate uuid)
             VMESS_PATH=$(openssl rand -hex 4)
             ENABLE_VMESS=true ;;
-        5)
-            [[ $ENABLE_TUIC == true ]] && echo -e "${YELLOW}Already active.${NC}" && return
+        tuic)
             read -rp "$(echo -e "${YELLOW}TUIC port [default: 8853]: ${NC}")" TUIC_PORT
             TUIC_PORT=${TUIC_PORT:-8853}
             TUIC_UUID=$("$BIN" generate uuid)
             TUIC_PASS=$(openssl rand -hex 16)
             gen_cert
             ENABLE_TUIC=true ;;
-        *) echo -e "${RED}Invalid.${NC}"; return ;;
     esac
 
     detect_main_ip
@@ -587,39 +604,40 @@ do_delete_protocol() {
         return
     fi
 
+    # Build list of active protocols with sequential numbers
+    local -a _NAMES _IDS
+    [[ $ENABLE_REALITY == true ]] && _NAMES+=("VLESS Reality")     && _IDS+=("reality")
+    [[ $ENABLE_HY2     == true ]] && _NAMES+=("Hysteria2")         && _IDS+=("hy2")
+    [[ $ENABLE_SOCKS5  == true ]] && _NAMES+=("SOCKS5")            && _IDS+=("socks5")
+    [[ $ENABLE_VMESS   == true ]] && _NAMES+=("VMess + WebSocket") && _IDS+=("vmess")
+    [[ $ENABLE_TUIC    == true ]] && _NAMES+=("TUIC")              && _IDS+=("tuic")
+
     header
     echo -e " ${BOLD}Remove a protocol:${NC}"
     echo ""
-    [[ $ENABLE_REALITY == true ]] && echo -e "  ${GREEN}1.${NC} VLESS Reality"
-    [[ $ENABLE_HY2     == true ]] && echo -e "  ${GREEN}2.${NC} Hysteria2"
-    [[ $ENABLE_SOCKS5  == true ]] && echo -e "  ${GREEN}3.${NC} SOCKS5"
-    [[ $ENABLE_VMESS   == true ]] && echo -e "  ${GREEN}4.${NC} VMess + WebSocket"
-    [[ $ENABLE_TUIC    == true ]] && echo -e "  ${GREEN}5.${NC} TUIC"
-    echo ""
-    read -rp "$(echo -e "${YELLOW}Choice: ${NC}")" DEL_CHOICE
 
-    case "$DEL_CHOICE" in
-        1)
-            [[ $ENABLE_REALITY != true ]] && echo -e "${YELLOW}Not active.${NC}" && return
-            confirm "Remove VLESS Reality?" || return
-            ENABLE_REALITY=false ;;
-        2)
-            [[ $ENABLE_HY2 != true ]] && echo -e "${YELLOW}Not active.${NC}" && return
-            confirm "Remove Hysteria2?" || return
-            ENABLE_HY2=false ;;
-        3)
-            [[ $ENABLE_SOCKS5 != true ]] && echo -e "${YELLOW}Not active.${NC}" && return
-            confirm "Remove SOCKS5?" || return
-            ENABLE_SOCKS5=false ;;
-        4)
-            [[ $ENABLE_VMESS != true ]] && echo -e "${YELLOW}Not active.${NC}" && return
-            confirm "Remove VMess + WebSocket?" || return
-            ENABLE_VMESS=false ;;
-        5)
-            [[ $ENABLE_TUIC != true ]] && echo -e "${YELLOW}Not active.${NC}" && return
-            confirm "Remove TUIC?" || return
-            ENABLE_TUIC=false ;;
-        *) echo -e "${RED}Invalid.${NC}"; return ;;
+    for i in "${!_NAMES[@]}"; do
+        echo -e "  ${GREEN}$((i+1)).${NC}  ${_NAMES[$i]}"
+    done
+
+    echo ""
+    read -rp "$(echo -e "${YELLOW}Choice [1-${#_NAMES[@]}]: ${NC}")" DEL_CHOICE
+
+    if ! [[ "$DEL_CHOICE" =~ ^[0-9]+$ ]] || (( DEL_CHOICE < 1 || DEL_CHOICE > ${#_NAMES[@]} )); then
+        echo -e "${RED}Invalid.${NC}"; return
+    fi
+
+    local _SEL="${_IDS[$((DEL_CHOICE-1))]}"
+    local _LABEL="${_NAMES[$((DEL_CHOICE-1))]}"
+
+    confirm "Remove ${_LABEL}?" || return
+
+    case "$_SEL" in
+        reality) ENABLE_REALITY=false ;;
+        hy2)     ENABLE_HY2=false ;;
+        socks5)  ENABLE_SOCKS5=false ;;
+        vmess)   ENABLE_VMESS=false ;;
+        tuic)    ENABLE_TUIC=false ;;
     esac
 
     detect_main_ip
@@ -629,7 +647,7 @@ do_delete_protocol() {
     write_info
     systemctl restart sing-box
     sleep 1
-    echo -e "${GREEN}✓ Protocol removed and service restarted.${NC}"
+    echo -e "${GREEN}✓ ${_LABEL} removed and service restarted.${NC}"
     show_info
 }
 
