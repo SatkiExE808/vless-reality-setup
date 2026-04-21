@@ -1,10 +1,10 @@
-# sing-box VLESS Reality Manager
+# sing-box Proxy Manager
 
-A clean, interactive installer and manager for [sing-box](https://github.com/SagerNet/sing-box) with **VLESS Reality** and **Hysteria2** support.
+A clean, interactive installer and manager for [sing-box](https://github.com/SagerNet/sing-box) — supports **VLESS Reality**, **Hysteria2**, and **SOCKS5** in any combination.
 
 - Interactive menu — install, manage, update, uninstall
 - Auto-installs latest sing-box binary
-- Generates fresh UUID, Reality keypair, and Short ID on every install
+- Mix and match protocols on the same server
 - QR code output for mobile clients
 - Supports `amd64` and `arm64`
 - Tested on Debian 11/12 and Ubuntu 20.04+
@@ -21,11 +21,24 @@ bash <(curl -sL https://raw.githubusercontent.com/SatkiExE808/vless-reality-setu
 
 ---
 
-## Menu
+## Protocol Menu
+
+```
+  1. VLESS Reality          (TCP · most secure)
+  2. Hysteria2              (UDP · fast)
+  3. SOCKS5                 (TCP · simple)
+  4. VLESS Reality + Hysteria2
+  5. VLESS Reality + SOCKS5
+  6. All protocols
+```
+
+---
+
+## Management Menu
 
 ```
 ╔══════════════════════════════════════════════╗
-║  sing-box VLESS Reality Manager              ║
+║  sing-box Proxy Manager                      ║
 ║  github.com/SatkiExE808/vless-reality-setup  ║
 ╚══════════════════════════════════════════════╝
 
@@ -46,15 +59,8 @@ bash <(curl -sL https://raw.githubusercontent.com/SatkiExE808/vless-reality-setu
 
 ## Protocols
 
-| Protocol | Transport | Use Case |
-|---|---|---|
-| **VLESS Reality** | TCP | Most secure, indistinguishable from real HTTPS |
-| **Hysteria2** | UDP (QUIC) | High speed, low latency |
-| **Both** | TCP + UDP | Best of both |
-
 ### VLESS Reality
-
-Uses the real TLS certificate of `www.microsoft.com` via the Reality protocol. Traffic looks exactly like a normal HTTPS connection — no self-signed certs, no detectable fingerprints.
+Uses the real TLS certificate of `www.microsoft.com` — traffic is indistinguishable from normal HTTPS. Most censorship-resistant option.
 
 | Field | Value |
 |---|---|
@@ -64,8 +70,10 @@ Uses the real TLS certificate of `www.microsoft.com` via the Reality protocol. T
 | Transport | TCP |
 
 ### Hysteria2
+QUIC-based protocol with self-signed TLS. Ideal for high-bandwidth or high-latency connections.
 
-Self-signed certificate with QUIC transport. Ideal for high-bandwidth or high-latency connections.
+### SOCKS5
+Simple TCP proxy built into sing-box. Optional username/password authentication. No extra software needed.
 
 ---
 
@@ -83,18 +91,22 @@ Self-signed certificate with QUIC transport. Ideal for high-bandwidth or high-la
 
 ## Client Setup
 
-### v2rayN (Windows)
+### v2rayN (Windows) — VLESS Reality
 
 1. Copy the `vless://` link from the output
 2. **Servers** → **Import bulk URL from clipboard**
 3. Right-click → **Set as active server**
 4. Enable system proxy
 
-> The **Flow** field must be `xtls-rprx-vision`. If missing, all connections will be rejected by the server.
+> **Flow** must be `xtls-rprx-vision`. Without it, the server rejects all connections.
 
 ### NekoBox / Hiddify / v2rayNG (Android)
 
 Scan the QR code printed after installation, or paste the import link manually.
+
+### SOCKS5 — Any Client
+
+Use the displayed IP, port, and credentials directly in your browser or app's proxy settings.
 
 ---
 

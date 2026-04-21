@@ -1,9 +1,10 @@
 #!/bin/bash
-# sing-box Manager — VLESS Reality + Hysteria2
+# sing-box Manager — VLESS Reality + Hysteria2 + SOCKS5
 # github.com/SatkiExE808/vless-reality-setup
 
 RED='\033[0;31m';   GREEN='\033[0;32m';  YELLOW='\033[1;33m'
-CYAN='\033[0;36m';  PURPLE='\033[0;35m'; BOLD='\033[1m'; NC='\033[0m'
+CYAN='\033[0;36m';  PURPLE='\033[0;35m'; BLUE='\033[0;34m'
+BOLD='\033[1m'; NC='\033[0m'
 
 BIN="/usr/local/bin/sing-box"
 CFG_DIR="/etc/sing-box"
@@ -19,7 +20,7 @@ SNI="www.microsoft.com"
 header() {
     clear
     echo -e "${CYAN}╔══════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${NC}  ${BOLD}sing-box VLESS Reality Manager${NC}              ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}  ${BOLD}sing-box Proxy Manager${NC}                      ${CYAN}║${NC}"
     echo -e "${CYAN}║${NC}  github.com/SatkiExE808/vless-reality-setup  ${CYAN}║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════╝${NC}"
     echo ""
@@ -65,13 +66,10 @@ gen_cert() {
         | sed 's/.*=//;s/://g' | tr '[:upper:]' '[:lower:]')
 }
 
-# ── Write configs ──────────────────────────────────────────────────────────────
+# ── Inbound JSON builders ──────────────────────────────────────────────────────
 
-write_config_reality() {
-    cat > "$CFG_FILE" << EOF
-{
-  "log": { "level": "warn", "timestamp": true },
-  "inbounds": [
+json_vless() {
+    cat << EOF
     {
       "type": "vless",
       "tag": "vless-reality",
@@ -89,18 +87,11 @@ write_config_reality() {
         }
       }
     }
-  ],
-  "outbounds": [{ "type": "direct", "tag": "direct" }],
-  "route": { "rules": [{ "action": "sniff" }], "final": "direct" }
-}
 EOF
 }
 
-write_config_hy2() {
-    cat > "$CFG_FILE" << EOF
-{
-  "log": { "level": "warn", "timestamp": true },
-  "inbounds": [
+json_hy2() {
+    cat << EOF
     {
       "type": "hysteria2",
       "tag": "hysteria2",
@@ -114,48 +105,51 @@ write_config_hy2() {
         "key_path": "${CFG_DIR}/key.pem"
       }
     }
-  ],
-  "outbounds": [{ "type": "direct", "tag": "direct" }],
-  "route": { "rules": [{ "action": "sniff" }], "final": "direct" }
-}
 EOF
 }
 
-write_config_both() {
+json_socks5() {
+    if [[ -n "$SOCKS_USER" ]]; then
+        cat << EOF
+    {
+      "type": "socks",
+      "tag": "socks5",
+      "listen": "0.0.0.0",
+      "listen_port": ${SOCKS_PORT},
+      "users": [{ "username": "${SOCKS_USER}", "password": "${SOCKS_PASS}" }]
+    }
+EOF
+    else
+        cat << EOF
+    {
+      "type": "socks",
+      "tag": "socks5",
+      "listen": "0.0.0.0",
+      "listen_port": ${SOCKS_PORT}
+    }
+EOF
+    fi
+}
+
+# ── Write config ───────────────────────────────────────────────────────────────
+
+write_config() {
+    local parts=()
+    [[ $ENABLE_REALITY  == true ]] && parts+=("$(json_vless)")
+    [[ $ENABLE_HY2      == true ]] && parts+=("$(json_hy2)")
+    [[ $ENABLE_SOCKS5   == true ]] && parts+=("$(json_socks5)")
+
+    local inbounds=""
+    for i in "${!parts[@]}"; do
+        [[ $i -gt 0 ]] && inbounds+=","$'\n'
+        inbounds+="${parts[$i]}"
+    done
+
     cat > "$CFG_FILE" << EOF
 {
   "log": { "level": "warn", "timestamp": true },
   "inbounds": [
-    {
-      "type": "vless",
-      "tag": "vless-reality",
-      "listen": "::",
-      "listen_port": ${VLESS_PORT},
-      "users": [{ "uuid": "${UUID}", "flow": "xtls-rprx-vision" }],
-      "tls": {
-        "enabled": true,
-        "server_name": "${SNI}",
-        "reality": {
-          "enabled": true,
-          "handshake": { "server": "${SNI}", "server_port": 443 },
-          "private_key": "${PRIVATE_KEY}",
-          "short_id": ["${SHORT_ID}"]
-        }
-      }
-    },
-    {
-      "type": "hysteria2",
-      "tag": "hysteria2",
-      "listen": "::",
-      "listen_port": ${HY2_PORT},
-      "users": [{ "password": "${HY2_PASS}" }],
-      "tls": {
-        "enabled": true,
-        "alpn": ["h3"],
-        "certificate_path": "${CFG_DIR}/cert.pem",
-        "key_path": "${CFG_DIR}/key.pem"
-      }
-    }
+${inbounds}
   ],
   "outbounds": [{ "type": "direct", "tag": "direct" }],
   "route": { "rules": [{ "action": "sniff" }], "final": "direct" }
@@ -211,7 +205,7 @@ show_info() {
     header
     echo -e "${CYAN}══════════════════════════════════════════════════${NC}"
 
-    if [[ "$MODE" == "reality" || "$MODE" == "both" ]]; then
+    if [[ $ENABLE_REALITY == true ]]; then
         VLESS_LINK="vless://${UUID}@${SERVER_IP}:${VLESS_PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${SNI}&fp=chrome&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}&type=tcp#Reality-${SERVER_IP}"
         echo -e " ${BOLD}${GREEN}◆ VLESS Reality${NC}"
         echo -e "${CYAN}──────────────────────────────────────────────────${NC}"
@@ -228,7 +222,7 @@ show_info() {
         show_qr "$VLESS_LINK"
     fi
 
-    if [[ "$MODE" == "hysteria2" || "$MODE" == "both" ]]; then
+    if [[ $ENABLE_HY2 == true ]]; then
         HY2_LINK="hy2://${HY2_PASS}@${SERVER_IP}:${HY2_PORT}?insecure=1&sni=${SNI}#HY2-${SERVER_IP}"
         echo ""
         echo -e " ${BOLD}${PURPLE}◆ Hysteria2${NC}"
@@ -243,8 +237,22 @@ show_info() {
         show_qr "$HY2_LINK"
     fi
 
-    echo -e "${CYAN}══════════════════════════════════════════════════${NC}"
+    if [[ $ENABLE_SOCKS5 == true ]]; then
+        echo ""
+        echo -e " ${BOLD}${BLUE}◆ SOCKS5${NC}"
+        echo -e "${CYAN}──────────────────────────────────────────────────${NC}"
+        printf "  %-12s ${GREEN}%s${NC}\n" "Address:"  "$SERVER_IP"
+        printf "  %-12s ${GREEN}%s${NC}\n" "Port:"     "$SOCKS_PORT"
+        if [[ -n "$SOCKS_USER" ]]; then
+            printf "  %-12s ${GREEN}%s${NC}\n" "Username:" "$SOCKS_USER"
+            printf "  %-12s ${GREEN}%s${NC}\n" "Password:" "$SOCKS_PASS"
+        else
+            printf "  %-12s ${GREEN}%s${NC}\n" "Auth:"     "none"
+        fi
+    fi
+
     echo ""
+    echo -e "${CYAN}══════════════════════════════════════════════════${NC}"
     SB_STATUS=$(systemctl is-active sing-box 2>/dev/null)
     SB_VER=$("$BIN" version 2>/dev/null | grep -oP '[\d]+\.[\d]+\.[\d]+' | head -1)
     [[ "$SB_STATUS" == "active" ]] \
@@ -259,28 +267,51 @@ do_install() {
     header
     echo -e " ${BOLD}Select protocol:${NC}"
     echo ""
-    echo -e "  ${GREEN}1.${NC} VLESS Reality          ${CYAN}(TCP · recommended)${NC}"
+    echo -e "  ${GREEN}1.${NC} VLESS Reality          ${CYAN}(TCP · most secure)${NC}"
     echo -e "  ${GREEN}2.${NC} Hysteria2               ${CYAN}(UDP · fast)${NC}"
-    echo -e "  ${GREEN}3.${NC} VLESS Reality + Hysteria2"
+    echo -e "  ${GREEN}3.${NC} SOCKS5                  ${CYAN}(TCP · simple)${NC}"
+    echo -e "  ${GREEN}4.${NC} VLESS Reality + Hysteria2"
+    echo -e "  ${GREEN}5.${NC} VLESS Reality + SOCKS5"
+    echo -e "  ${GREEN}6.${NC} All protocols"
     echo ""
-    read -rp "$(echo -e "${YELLOW}Choice [1-3, default 1]: ${NC}")" PC
+    read -rp "$(echo -e "${YELLOW}Choice [1-6, default 1]: ${NC}")" PC
     PC=${PC:-1}
 
+    ENABLE_REALITY=false
+    ENABLE_HY2=false
+    ENABLE_SOCKS5=false
+
     case "$PC" in
-        1) MODE="reality"  ;;
-        2) MODE="hysteria2";;
-        3) MODE="both"     ;;
+        1) ENABLE_REALITY=true ;;
+        2) ENABLE_HY2=true ;;
+        3) ENABLE_SOCKS5=true ;;
+        4) ENABLE_REALITY=true; ENABLE_HY2=true ;;
+        5) ENABLE_REALITY=true; ENABLE_SOCKS5=true ;;
+        6) ENABLE_REALITY=true; ENABLE_HY2=true; ENABLE_SOCKS5=true ;;
         *) echo -e "${RED}Invalid.${NC}"; return ;;
     esac
 
     echo ""
-    if [[ "$MODE" == "reality" || "$MODE" == "both" ]]; then
+    if [[ $ENABLE_REALITY == true ]]; then
         read -rp "$(echo -e "${YELLOW}VLESS port [default: 443]: ${NC}")" VLESS_PORT
         VLESS_PORT=${VLESS_PORT:-443}
     fi
-    if [[ "$MODE" == "hysteria2" || "$MODE" == "both" ]]; then
+    if [[ $ENABLE_HY2 == true ]]; then
         read -rp "$(echo -e "${YELLOW}Hysteria2 port [default: 8443]: ${NC}")" HY2_PORT
         HY2_PORT=${HY2_PORT:-8443}
+    fi
+    if [[ $ENABLE_SOCKS5 == true ]]; then
+        read -rp "$(echo -e "${YELLOW}SOCKS5 port [default: 1080]: ${NC}")" SOCKS_PORT
+        SOCKS_PORT=${SOCKS_PORT:-1080}
+        read -rp "$(echo -e "${YELLOW}Add authentication? [y/N]: ${NC}")" SOCKS_AUTH
+        if [[ "$SOCKS_AUTH" =~ ^[Yy]$ ]]; then
+            SOCKS_USER="user$(openssl rand -hex 3)"
+            SOCKS_PASS=$(openssl rand -hex 8)
+            echo -e "  Generated → ${GREEN}${SOCKS_USER}${NC} / ${GREEN}${SOCKS_PASS}${NC}"
+        else
+            SOCKS_USER=""
+            SOCKS_PASS=""
+        fi
     fi
 
     detect_ip
@@ -296,19 +327,17 @@ do_install() {
     HY2_PASS=$(openssl rand -hex 16)
     CERT_FP=""
 
-    [[ "$MODE" == "hysteria2" || "$MODE" == "both" ]] && gen_cert
+    [[ $ENABLE_HY2 == true ]] && gen_cert
 
-    case "$MODE" in
-        reality)   write_config_reality ;;
-        hysteria2) write_config_hy2     ;;
-        both)      write_config_both    ;;
-    esac
+    write_config
 
     "$BIN" check -c "$CFG_FILE" || { echo -e "${RED}Config check failed.${NC}"; exit 1; }
     echo -e "${GREEN}✓ Config valid${NC}"
 
     cat > "$INFO_FILE" << EOF
-MODE=${MODE}
+ENABLE_REALITY=${ENABLE_REALITY}
+ENABLE_HY2=${ENABLE_HY2}
+ENABLE_SOCKS5=${ENABLE_SOCKS5}
 UUID=${UUID}
 PRIVATE_KEY=${PRIVATE_KEY}
 PUBLIC_KEY=${PUBLIC_KEY}
@@ -316,6 +345,9 @@ SHORT_ID=${SHORT_ID}
 VLESS_PORT=${VLESS_PORT:-443}
 HY2_PORT=${HY2_PORT:-8443}
 HY2_PASS=${HY2_PASS}
+SOCKS_PORT=${SOCKS_PORT:-1080}
+SOCKS_USER=${SOCKS_USER}
+SOCKS_PASS=${SOCKS_PASS}
 CERT_FP=${CERT_FP}
 EOF
 
@@ -382,11 +414,9 @@ main_menu() {
         if is_installed; then
             SB_STATUS=$(systemctl is-active sing-box 2>/dev/null)
             SB_VER=$("$BIN" version 2>/dev/null | grep -oP '[\d]+\.[\d]+\.[\d]+' | head -1)
-            if [[ "$SB_STATUS" == "active" ]]; then
-                echo -e "  Status : ${GREEN}● running${NC}   Version : ${GREEN}${SB_VER}${NC}"
-            else
-                echo -e "  Status : ${RED}● stopped${NC}   Version : ${SB_VER}"
-            fi
+            [[ "$SB_STATUS" == "active" ]] \
+                && echo -e "  Status : ${GREEN}● running${NC}   Version : ${GREEN}${SB_VER}${NC}" \
+                || echo -e "  Status : ${RED}● stopped${NC}   Version : ${SB_VER}"
         else
             echo -e "  Status : ${YELLOW}not installed${NC}"
         fi
