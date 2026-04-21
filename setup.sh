@@ -389,6 +389,156 @@ EOF
     show_info
 }
 
+# ── Add / Delete protocol ─────────────────────────────────────────────────────
+
+do_add_protocol() {
+    [[ ! -f "$INFO_FILE" ]] && echo -e "${RED}Not installed.${NC}" && return
+    source "$INFO_FILE"
+
+    header
+    echo -e " ${BOLD}Add a protocol:${NC}"
+    echo ""
+    [[ $ENABLE_REALITY  == true ]] && echo -e "  ${CYAN}·${NC} VLESS Reality  (already active)" \
+                                   || echo -e "  ${GREEN}1.${NC} VLESS Reality"
+    [[ $ENABLE_HY2      == true ]] && echo -e "  ${CYAN}·${NC} Hysteria2      (already active)" \
+                                   || echo -e "  ${GREEN}2.${NC} Hysteria2"
+    [[ $ENABLE_SOCKS5   == true ]] && echo -e "  ${CYAN}·${NC} SOCKS5         (already active)" \
+                                   || echo -e "  ${GREEN}3.${NC} SOCKS5"
+    echo ""
+    read -rp "$(echo -e "${YELLOW}Choice: ${NC}")" ADD_CHOICE
+
+    case "$ADD_CHOICE" in
+        1)
+            [[ $ENABLE_REALITY == true ]] && echo -e "${YELLOW}Already active.${NC}" && return
+            read -rp "$(echo -e "${YELLOW}VLESS port [default: 443]: ${NC}")" VLESS_PORT
+            VLESS_PORT=${VLESS_PORT:-443}
+            KEYPAIR=$("$BIN" generate reality-keypair)
+            UUID=$("$BIN" generate uuid)
+            PRIVATE_KEY=$(echo "$KEYPAIR" | awk '/PrivateKey/{print $2}')
+            PUBLIC_KEY=$(echo  "$KEYPAIR" | awk '/PublicKey/{print $2}')
+            SHORT_ID=$(openssl rand -hex 8)
+            ENABLE_REALITY=true ;;
+        2)
+            [[ $ENABLE_HY2 == true ]] && echo -e "${YELLOW}Already active.${NC}" && return
+            read -rp "$(echo -e "${YELLOW}Hysteria2 port [default: 8443]: ${NC}")" HY2_PORT
+            HY2_PORT=${HY2_PORT:-8443}
+            HY2_PASS=$(openssl rand -hex 16)
+            gen_cert
+            ENABLE_HY2=true ;;
+        3)
+            [[ $ENABLE_SOCKS5 == true ]] && echo -e "${YELLOW}Already active.${NC}" && return
+            read -rp "$(echo -e "${YELLOW}SOCKS5 port [default: 1080]: ${NC}")" SOCKS_PORT
+            SOCKS_PORT=${SOCKS_PORT:-1080}
+            read -rp "$(echo -e "${YELLOW}Add authentication? [y/N]: ${NC}")" SOCKS_AUTH
+            if [[ "$SOCKS_AUTH" =~ ^[Yy]$ ]]; then
+                SOCKS_USER="user$(openssl rand -hex 3)"
+                SOCKS_PASS=$(openssl rand -hex 8)
+                echo -e "  Generated → ${GREEN}${SOCKS_USER}${NC} / ${GREEN}${SOCKS_PASS}${NC}"
+            else
+                SOCKS_USER=""; SOCKS_PASS=""
+            fi
+            ENABLE_SOCKS5=true ;;
+        *) echo -e "${RED}Invalid.${NC}"; return ;;
+    esac
+
+    detect_main_ip
+    write_config
+    "$BIN" check -c "$CFG_FILE" || { echo -e "${RED}Config invalid.${NC}"; return; }
+
+    cat > "$INFO_FILE" << EOF
+ENABLE_REALITY=${ENABLE_REALITY}
+ENABLE_HY2=${ENABLE_HY2}
+ENABLE_SOCKS5=${ENABLE_SOCKS5}
+SERVER_IP=${SERVER_IP}
+UUID=${UUID}
+PRIVATE_KEY=${PRIVATE_KEY}
+PUBLIC_KEY=${PUBLIC_KEY}
+SHORT_ID=${SHORT_ID}
+VLESS_PORT=${VLESS_PORT:-443}
+HY2_PORT=${HY2_PORT:-8443}
+HY2_PASS=${HY2_PASS}
+SOCKS_PORT=${SOCKS_PORT:-1080}
+SOCKS_USER=${SOCKS_USER}
+SOCKS_PASS=${SOCKS_PASS}
+CERT_FP=${CERT_FP}
+MAIN_IP=${MAIN_IP}
+EOF
+
+    systemctl restart sing-box
+    sleep 1
+    echo -e "${GREEN}✓ Protocol added and service restarted.${NC}"
+    show_info
+}
+
+do_delete_protocol() {
+    [[ ! -f "$INFO_FILE" ]] && echo -e "${RED}Not installed.${NC}" && return
+    source "$INFO_FILE"
+
+    # Count active protocols
+    local COUNT=0
+    [[ $ENABLE_REALITY == true ]] && ((COUNT++))
+    [[ $ENABLE_HY2     == true ]] && ((COUNT++))
+    [[ $ENABLE_SOCKS5  == true ]] && ((COUNT++))
+
+    if [[ $COUNT -le 1 ]]; then
+        echo -e "${RED}Only one protocol active. Use Uninstall instead.${NC}"
+        return
+    fi
+
+    header
+    echo -e " ${BOLD}Remove a protocol:${NC}"
+    echo ""
+    [[ $ENABLE_REALITY == true ]] && echo -e "  ${GREEN}1.${NC} VLESS Reality"
+    [[ $ENABLE_HY2     == true ]] && echo -e "  ${GREEN}2.${NC} Hysteria2"
+    [[ $ENABLE_SOCKS5  == true ]] && echo -e "  ${GREEN}3.${NC} SOCKS5"
+    echo ""
+    read -rp "$(echo -e "${YELLOW}Choice: ${NC}")" DEL_CHOICE
+
+    case "$DEL_CHOICE" in
+        1)
+            [[ $ENABLE_REALITY != true ]] && echo -e "${YELLOW}Not active.${NC}" && return
+            confirm "Remove VLESS Reality?" || return
+            ENABLE_REALITY=false ;;
+        2)
+            [[ $ENABLE_HY2 != true ]] && echo -e "${YELLOW}Not active.${NC}" && return
+            confirm "Remove Hysteria2?" || return
+            ENABLE_HY2=false ;;
+        3)
+            [[ $ENABLE_SOCKS5 != true ]] && echo -e "${YELLOW}Not active.${NC}" && return
+            confirm "Remove SOCKS5?" || return
+            ENABLE_SOCKS5=false ;;
+        *) echo -e "${RED}Invalid.${NC}"; return ;;
+    esac
+
+    detect_main_ip
+    write_config
+    "$BIN" check -c "$CFG_FILE" || { echo -e "${RED}Config invalid.${NC}"; return; }
+
+    cat > "$INFO_FILE" << EOF
+ENABLE_REALITY=${ENABLE_REALITY}
+ENABLE_HY2=${ENABLE_HY2}
+ENABLE_SOCKS5=${ENABLE_SOCKS5}
+SERVER_IP=${SERVER_IP}
+UUID=${UUID}
+PRIVATE_KEY=${PRIVATE_KEY}
+PUBLIC_KEY=${PUBLIC_KEY}
+SHORT_ID=${SHORT_ID}
+VLESS_PORT=${VLESS_PORT:-443}
+HY2_PORT=${HY2_PORT:-8443}
+HY2_PASS=${HY2_PASS}
+SOCKS_PORT=${SOCKS_PORT:-1080}
+SOCKS_USER=${SOCKS_USER}
+SOCKS_PASS=${SOCKS_PASS}
+CERT_FP=${CERT_FP}
+MAIN_IP=${MAIN_IP}
+EOF
+
+    systemctl restart sing-box
+    sleep 1
+    echo -e "${GREEN}✓ Protocol removed and service restarted.${NC}"
+    show_info
+}
+
 # ── Update binary ──────────────────────────────────────────────────────────────
 
 do_update() {
@@ -454,41 +604,45 @@ main_menu() {
             echo -e "  ${RED}0.${NC} Exit"
         else
             echo -e "  ${GREEN}1.${NC} Show Config & Links"
-            echo -e "  ${GREEN}2.${NC} Restart Service"
-            echo -e "  ${GREEN}3.${NC} Stop / Start Service"
-            echo -e "  ${GREEN}4.${NC} View Logs"
-            echo -e "  ${GREEN}5.${NC} Update sing-box"
-            echo -e "  ${GREEN}6.${NC} Reinstall"
-            echo -e "  ${RED}7.${NC} Uninstall"
+            echo -e "  ${GREEN}2.${NC} Add Protocol"
+            echo -e "  ${GREEN}3.${NC} Remove Protocol"
+            echo -e "  ${GREEN}4.${NC} Restart Service"
+            echo -e "  ${GREEN}5.${NC} Stop / Start Service"
+            echo -e "  ${GREEN}6.${NC} View Logs"
+            echo -e "  ${GREEN}7.${NC} Update sing-box"
+            echo -e "  ${GREEN}8.${NC} Reinstall"
+            echo -e "  ${RED}9.${NC} Uninstall"
             echo ""
             echo -e "  ${RED}0.${NC} Exit"
         fi
 
         echo ""
-        read -rp "$(echo -e "${YELLOW}Select [0-7]: ${NC}")" OPT
+        read -rp "$(echo -e "${YELLOW}Select [0-9]: ${NC}")" OPT
 
         case "$OPT" in
             1)
                 if is_installed; then show_info; else do_install; fi
                 pause ;;
-            2)
+            2) do_add_protocol;    pause ;;
+            3) do_delete_protocol; pause ;;
+            4)
                 systemctl restart sing-box \
                     && echo -e "${GREEN}✓ Restarted.${NC}" \
                     || echo -e "${RED}✗ Failed.${NC}"
                 pause ;;
-            3)
+            5)
                 if [[ "$(systemctl is-active sing-box 2>/dev/null)" == "active" ]]; then
                     systemctl stop  sing-box && echo -e "${YELLOW}● Stopped.${NC}"
                 else
                     systemctl start sing-box && echo -e "${GREEN}● Started.${NC}"
                 fi
                 pause ;;
-            4)
+            6)
                 journalctl -u sing-box -n 60 --no-pager
                 pause ;;
-            5) do_update;    pause ;;
-            6) do_uninstall; do_install; pause ;;
-            7) do_uninstall; pause ;;
+            7) do_update;    pause ;;
+            8) do_uninstall; do_install; pause ;;
+            9) do_uninstall; pause ;;
             0) exit 0 ;;
             *) echo -e "${RED}Invalid option.${NC}"; sleep 1 ;;
         esac
