@@ -25,8 +25,7 @@ done
 header() {
     clear
     echo -e "${CYAN}╔══════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${NC}  ${BOLD}VPS Toolbox${NC}                                       ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}  ${CYAN}github.com/SatkiExE808/vless-reality-setup${NC}       ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}    ${RED}${BOLD}V${NC} ${YELLOW}${BOLD}P${NC} ${GREEN}${BOLD}S${NC}   ${CYAN}${BOLD}T${NC} ${BLUE}${BOLD}O${NC} ${PURPLE}${BOLD}O${NC} ${RED}${BOLD}L${NC} ${YELLOW}${BOLD}B${NC} ${GREEN}${BOLD}O${NC} ${CYAN}${BOLD}X${NC}                         ${CYAN}║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}"
     echo ""
 }
@@ -1290,8 +1289,7 @@ main_menu() {
         fi
 
         echo -e "${CYAN}╔══════════════════════════════════════════════════╗${NC}"
-        echo -e "${CYAN}║${NC}  ${BOLD}VPS Toolbox${NC}                                       ${CYAN}║${NC}"
-        echo -e "${CYAN}║${NC}  ${CYAN}github.com/SatkiExE808/vless-reality-setup${NC}       ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}    ${RED}${BOLD}V${NC} ${YELLOW}${BOLD}P${NC} ${GREEN}${BOLD}S${NC}   ${CYAN}${BOLD}T${NC} ${BLUE}${BOLD}O${NC} ${PURPLE}${BOLD}O${NC} ${RED}${BOLD}L${NC} ${YELLOW}${BOLD}B${NC} ${GREEN}${BOLD}O${NC} ${CYAN}${BOLD}X${NC}                         ${CYAN}║${NC}"
         echo -e "${CYAN}╠══════════════════════════════════════════════════╣${NC}"
         if is_installed; then
             local _ver_display="${_SB_VER:-?}"
