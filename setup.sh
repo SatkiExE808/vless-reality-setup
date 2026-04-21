@@ -334,6 +334,11 @@ do_install() {
 
     detect_ip
     detect_main_ip
+    echo ""
+    echo -e "  Auto-detected IP : ${GREEN}${SERVER_IP}${NC}"
+    echo -e "  ${CYAN}(On NAT VPS the detected IP may differ from the IP clients connect to)${NC}"
+    read -rp "$(echo -e "${YELLOW}Server IP [${SERVER_IP}]: ${NC}")" INPUT_IP
+    [[ -n "$INPUT_IP" ]] && SERVER_IP="$INPUT_IP"
     install_binary
     mkdir -p "$CFG_DIR"
     echo -e "${YELLOW}▶ Generating credentials...${NC}"
