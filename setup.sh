@@ -951,56 +951,96 @@ vps_change_dns() {
         *) echo -e "${RED}Invalid.${NC}"; return ;;
     esac
 
+    echo ""
     local _RESOLV="/etc/resolv.conf"
+    local _methods=""
 
-    # Backup the current content (follow symlink so we get real data)
-    cp -L "$_RESOLV" "${_RESOLV}.bak" 2>/dev/null || true
-
-    # Remove immutable flag if previously set
-    chattr -i "$_RESOLV" 2>/dev/null || true
-
-    # If it's a symlink (systemd-resolved stub), remove it so we can write a real file
-    [[ -L "$_RESOLV" ]] && rm -f "$_RESOLV"
-
-    # Write new DNS
-    printf "nameserver %s\nnameserver %s\n" "$_D1" "$_D2" > "$_RESOLV"
-
-    # Protect the file — prevents systemd-resolved / NetworkManager from overwriting it
-    chattr +i "$_RESOLV" 2>/dev/null || true
-
-    # If systemd-resolved is running, configure it too and disable its stub listener
-    # so it doesn't fight for control of /etc/resolv.conf
+    # ── 1. systemd-resolved ──────────────────────────────────────────
+    # Configure upstream DNS and apply immediately via resolvectl.
+    # Do this FIRST so the stub at 127.0.0.53 forwards to the right server
+    # regardless of what /etc/resolv.conf contains.
     if systemctl is-active --quiet systemd-resolved 2>/dev/null; then
         mkdir -p /etc/systemd/resolved.conf.d
-        printf "[Resolve]\nDNS=%s %s\nDNSStubListener=no\n" \
-            "$_D1" "$_D2" > /etc/systemd/resolved.conf.d/custom-dns.conf
+        printf "[Resolve]\nDNS=%s %s\n" "$_D1" "$_D2" \
+            > /etc/systemd/resolved.conf.d/custom-dns.conf
+        # Apply immediately without restart using resolvectl on the default interface
+        local _IF
+        _IF=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'dev \K\S+')
+        if [[ -n "$_IF" ]]; then
+            resolvectl dns    "$_IF" "$_D1" "$_D2" 2>/dev/null
+            resolvectl domain "$_IF" "~."           2>/dev/null
+        fi
         systemctl restart systemd-resolved 2>/dev/null || true
+        _methods+=" systemd-resolved"
     fi
 
-    # If NetworkManager is running, tell it not to touch resolv.conf
+    # ── 2. NetworkManager ────────────────────────────────────────────
     if systemctl is-active --quiet NetworkManager 2>/dev/null; then
         mkdir -p /etc/NetworkManager/conf.d
         printf "[main]\ndns=none\n" > /etc/NetworkManager/conf.d/no-dns-override.conf
         systemctl reload NetworkManager 2>/dev/null || true
+        _methods+=" NetworkManager"
     fi
 
-    echo -e "${GREEN}✓ DNS set to ${_D1} / ${_D2}${NC}"
-    echo -e "  ${CYAN}Backup: ${_RESOLV}.bak  |  File protected with chattr +i${NC}"
+    # ── 3. resolvconf package ────────────────────────────────────────
+    # If resolvconf is installed it manages /etc/resolv.conf as a generated
+    # file — writing the target directly is overwritten. Write to its head file.
+    if command -v resolvconf &>/dev/null; then
+        mkdir -p /etc/resolvconf/resolv.conf.d
+        printf "nameserver %s\nnameserver %s\n" "$_D1" "$_D2" \
+            > /etc/resolvconf/resolv.conf.d/head
+        resolvconf -u 2>/dev/null || true
+        _methods+=" resolvconf"
+    fi
+
+    # ── 4. dhclient hook ─────────────────────────────────────────────
+    # Prevent DHCP lease renewal from overwriting our resolv.conf.
+    if [[ -d /etc/dhcp ]]; then
+        mkdir -p /etc/dhcp/dhclient-enter-hooks.d
+        printf '#!/bin/sh\n# Prevent dhclient from overwriting resolv.conf\nmake_resolv_conf() { : ; }\n' \
+            > /etc/dhcp/dhclient-enter-hooks.d/nodnsupdate
+        chmod +x /etc/dhcp/dhclient-enter-hooks.d/nodnsupdate
+    fi
+
+    # ── 5. Direct /etc/resolv.conf write ────────────────────────────
+    # Backup first (follow symlink to capture real content)
+    cp -L "$_RESOLV" "${_RESOLV}.bak" 2>/dev/null || true
+    # Remove symlink BEFORE chattr — chattr on a symlink targets the file it
+    # points to, not the symlink itself, so we'd remove immutability on the
+    # wrong file. Remove the link first, then operate on our new plain file.
+    [[ -L "$_RESOLV" ]] && rm -f "$_RESOLV"
+    # Now remove immutable flag from any pre-existing plain file
+    chattr -i "$_RESOLV" 2>/dev/null || true
+    # Write new DNS
+    printf "nameserver %s\nnameserver %s\n" "$_D1" "$_D2" > "$_RESOLV"
+    # Protect — chattr +i fails silently on LXC/OpenVZ (overlayfs); that's
+    # acceptable since methods 1-4 above cover those environments.
+    chattr +i "$_RESOLV" 2>/dev/null || true
+    _methods+=" resolv.conf"
+
+    echo -e "${GREEN}✓ DNS changed to ${_D1} / ${_D2}${NC}"
+    echo -e "  ${CYAN}Methods applied:${_methods}${NC}"
+    echo -e "  ${CYAN}Backup: ${_RESOLV}.bak${NC}"
     echo ""
+
+    # ── 6. Verify ────────────────────────────────────────────────────
     echo -e "${YELLOW}▶ Testing DNS resolution...${NC}"
+    sleep 1  # give systemd-resolved a moment to finish restarting
     local _ok=0
     if command -v dig &>/dev/null; then
         dig +short +time=5 "@$_D1" google.com A &>/dev/null && _ok=1
     elif command -v nslookup &>/dev/null; then
         nslookup google.com "$_D1" &>/dev/null && _ok=1
     else
-        getent hosts google.com &>/dev/null && _ok=1
+        getent ahosts google.com &>/dev/null && _ok=1
     fi
-
     if [[ "$_ok" -eq 1 ]]; then
         echo -e "${GREEN}✓ DNS resolution working.${NC}"
     else
-        echo -e "${YELLOW}⚠ Could not verify — test manually: dig @${_D1} google.com${NC}"
+        echo -e "${YELLOW}⚠ Direct query to ${_D1} failed — the DNS may still work${NC}"
+        echo -e "  ${CYAN}Test manually: cat /etc/resolv.conf${NC}"
+        [[ -n "$(command -v resolvectl)" ]] && \
+            echo -e "  ${CYAN}                resolvectl status${NC}"
     fi
 }
 
