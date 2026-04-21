@@ -30,14 +30,22 @@ confirm() { read -rp "$(echo -e "${YELLOW}$1 [y/N]: ${NC}")" r; [[ "$r" =~ ^[Yy]
 pause()   { echo ""; read -rp "$(echo -e "${YELLOW}Press Enter to continue...${NC}")"; }
 is_installed() { [[ -x "$BIN" && -f "$CFG_FILE" ]]; }
 
-detect_ip() {
-    SERVER_IP=$(curl -s4 --max-time 5 https://api.ipify.org 2>/dev/null)
-    [[ -z "$SERVER_IP" ]] && SERVER_IP=$(curl -s --max-time 5 https://api.ipify.org)
-}
-
 detect_main_ip() {
     MAIN_IP=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[\d.]+')
     [[ -z "$MAIN_IP" ]] && MAIN_IP=$(ip route get 8.8.8.8 2>/dev/null | grep -oP 'src \K[\d.]+')
+}
+
+detect_ip() {
+    # Use main interface IP first (not affected by VPN routing)
+    detect_main_ip
+    SERVER_IP="$MAIN_IP"
+    # Validate it's a public IP; fall back to ipify if it looks private
+    case "$SERVER_IP" in
+        10.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*|192.168.*|100.*)
+            SERVER_IP=$(curl -s4 --max-time 5 https://api.ipify.org 2>/dev/null)
+            [[ -z "$SERVER_IP" ]] && SERVER_IP=$(curl -s --max-time 5 https://api.ipify.org 2>/dev/null)
+            ;;
+    esac
 }
 
 # ── Install binary ─────────────────────────────────────────────────────────────
@@ -209,7 +217,8 @@ show_info() {
     [[ ! -f "$INFO_FILE" ]] && echo -e "${RED}Not installed.${NC}" && return
     # shellcheck source=/dev/null
     source "$INFO_FILE"
-    detect_ip
+    # SERVER_IP is saved at install time; fall back to live detection only if missing
+    [[ -z "$SERVER_IP" ]] && detect_ip
 
     header
     echo -e "${CYAN}══════════════════════════════════════════════════${NC}"
@@ -348,6 +357,7 @@ do_install() {
 ENABLE_REALITY=${ENABLE_REALITY}
 ENABLE_HY2=${ENABLE_HY2}
 ENABLE_SOCKS5=${ENABLE_SOCKS5}
+SERVER_IP=${SERVER_IP}
 UUID=${UUID}
 PRIVATE_KEY=${PRIVATE_KEY}
 PUBLIC_KEY=${PUBLIC_KEY}
