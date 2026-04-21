@@ -791,7 +791,7 @@ SYSCTL
     esac
 }
 
-# ── VPS Tools ─────────────────────────────────────────────────────────────────
+# ── VPS Toolbox ─────────────────────────────────────────────────────────────────
 
 vps_check_ip() {
     echo -e "${YELLOW}▶ Fetching IP info...${NC}"
@@ -1200,7 +1200,7 @@ EOF
 do_vps_tools() {
     while true; do
         header
-        echo -e "  ${BOLD}VPS Tools${NC}"
+        echo -e "  ${BOLD}VPS Toolbox${NC}"
         echo ""
         _menu_hdr "Network"
         _menu_item  1  "Check IP Info"
@@ -1309,7 +1309,7 @@ main_menu() {
             _menu_hdr "System"
             _menu_item  7  "Update sing-box"
             _menu_item  8  "BBR Enable / Disable"
-            _menu_item  9  "VPS Tools"
+            _menu_item  9  "VPS Toolbox"
             _menu_item 10  "Reinstall"
             _menu_quit 11  "Uninstall"
             _menu_sep
