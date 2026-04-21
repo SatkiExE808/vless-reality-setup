@@ -1067,10 +1067,157 @@ vps_node_quality() {
 }
 
 vps_check_place() {
-    echo -e "${YELLOW}▶ Running Check.Place...${NC}"
-    echo -e "  ${CYAN}Press Ctrl+C to abort.${NC}"
+    local _sep="${CYAN}──────────────────────────────────────────────────${NC}"
+
+    _cp_section() { echo -e "\n${YELLOW}▶ $1${NC}"; }
+    _cp_row()     { printf "  %-26s %s\n" "$1" "$2"; }
+    _cp_ok()      { echo -e "  ${GREEN}$1${NC}"; }
+    _cp_warn()    { echo -e "  ${YELLOW}$1${NC}"; }
+
     echo ""
-    bash <(curl -Ls Check.Place) -N
+    echo -e "${CYAN}╔══════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║        Network Quality Check (native)            ║${NC}"
+    echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}"
+
+    # ── 1. IP Detection ──────────────────────────────────────────────
+    _cp_section "IP Detection"
+    local _ip4 _ip6
+    _ip4=$(curl -s4 --max-time 5 https://api4.ipify.org 2>/dev/null || \
+           curl -s4 --max-time 5 https://ipv4.icanhazip.com 2>/dev/null)
+    _ip6=$(curl -s6 --max-time 5 https://api6.ipify.org 2>/dev/null || \
+           curl -s6 --max-time 5 https://ipv6.icanhazip.com 2>/dev/null)
+    [[ -n "$_ip4" ]] && _cp_row "IPv4:" "$_ip4" || _cp_warn "IPv4:  not detected"
+    [[ -n "$_ip6" ]] && _cp_row "IPv6:" "$_ip6" || _cp_warn "IPv6:  not detected"
+
+    # ── 2. IP Info (ASN / Geo / Type) ────────────────────────────────
+    _cp_section "IP Information"
+    local _IPAPI _ORG _AS _ISP _COUNTRY _CITY _REGION _PROXY _HOSTING _MOBILE _TYPE
+    if [[ -n "$_ip4" ]]; then
+        _IPAPI=$(curl -s --max-time 8 \
+            "http://ip-api.com/json/${_ip4}?fields=country,regionName,city,isp,org,as,proxy,hosting,mobile" \
+            2>/dev/null)
+        _COUNTRY=$(echo "$_IPAPI" | grep -o '"country":"[^"]*"'    | cut -d'"' -f4)
+        _REGION=$(echo "$_IPAPI"  | grep -o '"regionName":"[^"]*"' | cut -d'"' -f4)
+        _CITY=$(echo "$_IPAPI"    | grep -o '"city":"[^"]*"'       | cut -d'"' -f4)
+        _ISP=$(echo "$_IPAPI"     | grep -o '"isp":"[^"]*"'        | cut -d'"' -f4)
+        _ORG=$(echo "$_IPAPI"     | grep -o '"org":"[^"]*"'        | cut -d'"' -f4)
+        _AS=$(echo "$_IPAPI"      | grep -o '"as":"[^"]*"'         | cut -d'"' -f4)
+        _PROXY=$(echo "$_IPAPI"   | grep -o '"proxy":[^,}]*'       | cut -d: -f2 | tr -d ' ')
+        _HOSTING=$(echo "$_IPAPI" | grep -o '"hosting":[^,}]*'     | cut -d: -f2 | tr -d ' ')
+        _MOBILE=$(echo "$_IPAPI"  | grep -o '"mobile":[^,}]*'      | cut -d: -f2 | tr -d ' ')
+
+        _cp_row "Location:"   "${_CITY}, ${_REGION}, ${_COUNTRY}"
+        _cp_row "ISP:"        "$_ISP"
+        _cp_row "Org:"        "$_ORG"
+        _cp_row "ASN:"        "$_AS"
+
+        if [[ "$_PROXY" == "true" ]]; then   _TYPE="Proxy/VPN"
+        elif [[ "$_HOSTING" == "true" ]]; then _TYPE="Datacenter/Hosting"
+        elif [[ "$_MOBILE" == "true" ]]; then  _TYPE="Mobile"
+        else                                   _TYPE="Residential"; fi
+        _cp_row "IP Type:"    "$_TYPE"
+    else
+        _cp_warn "  Skipped — no IPv4 address"
+    fi
+
+    # ── 3. NAT Detection ─────────────────────────────────────────────
+    _cp_section "NAT Detection"
+    local _int_ip _ext_ip
+    _int_ip=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+')
+    _ext_ip="$_ip4"
+    _cp_row "Internal IP:" "${_int_ip:-n/a}"
+    _cp_row "External IP:" "${_ext_ip:-n/a}"
+    if [[ -z "$_int_ip" || -z "$_ext_ip" ]]; then
+        _cp_warn "NAT status: unknown"
+    elif [[ "$_int_ip" == "$_ext_ip" ]]; then
+        _cp_ok   "NAT type:   Full-cone / No NAT (direct public IP)"
+    else
+        _cp_warn "NAT type:   Behind NAT  (internal ≠ external)"
+    fi
+
+    # ── 4. TCP Stack ─────────────────────────────────────────────────
+    _cp_section "TCP Stack Configuration"
+    local _cc _qdisc _rmem _wmem _tw _mtu_probe
+    _cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo "n/a")
+    _qdisc=$(sysctl -n net.core.default_qdisc 2>/dev/null || echo "n/a")
+    _rmem=$(sysctl -n net.core.rmem_max 2>/dev/null | awk '{printf "%.0f KB", $1/1024}' || echo "n/a")
+    _wmem=$(sysctl -n net.core.wmem_max 2>/dev/null | awk '{printf "%.0f KB", $1/1024}' || echo "n/a")
+    _tw=$(sysctl -n net.ipv4.tcp_tw_reuse 2>/dev/null || echo "n/a")
+    _mtu_probe=$(sysctl -n net.ipv4.tcp_mtu_probing 2>/dev/null || echo "n/a")
+    _cp_row "Congestion Ctrl:"    "$_cc"
+    _cp_row "Queue Discipline:"   "$_qdisc"
+    _cp_row "Recv Buffer Max:"    "$_rmem"
+    _cp_row "Send Buffer Max:"    "$_wmem"
+    _cp_row "tcp_tw_reuse:"       "$_tw"
+    _cp_row "tcp_mtu_probing:"    "$_mtu_probe"
+
+    # ── 5. Network Interface ─────────────────────────────────────────
+    _cp_section "Network Interface"
+    local _iface _mtu _speed _duplex _rx _tx
+    _iface=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'dev \K\S+')
+    if [[ -n "$_iface" ]]; then
+        _mtu=$(cat /sys/class/net/"${_iface}"/mtu 2>/dev/null || echo "n/a")
+        _speed=$(cat /sys/class/net/"${_iface}"/speed 2>/dev/null || echo "n/a")
+        _duplex=$(cat /sys/class/net/"${_iface}"/duplex 2>/dev/null || echo "n/a")
+        _rx=$(awk '{printf "%.2f GB", $1/1024/1024/1024}' \
+              /sys/class/net/"${_iface}"/statistics/rx_bytes 2>/dev/null || echo "n/a")
+        _tx=$(awk '{printf "%.2f GB", $1/1024/1024/1024}' \
+              /sys/class/net/"${_iface}"/statistics/tx_bytes 2>/dev/null || echo "n/a")
+        _cp_row "Interface:"    "$_iface"
+        _cp_row "MTU:"          "${_mtu} bytes"
+        [[ "$_speed" != "-1" && "$_speed" != "n/a" ]] && \
+            _cp_row "Link Speed:"   "${_speed} Mbps" || \
+            _cp_row "Link Speed:"   "n/a"
+        _cp_row "Duplex:"       "$_duplex"
+        _cp_row "RX Total:"     "$_rx"
+        _cp_row "TX Total:"     "$_tx"
+    else
+        _cp_warn "Could not determine default interface"
+    fi
+
+    # ── 6. Global Latency ────────────────────────────────────────────
+    _cp_section "Global Latency"
+    printf "  %-28s %-12s %-8s %s\n" "Target" "Location" "Loss" "Latency"
+    echo -e "  ${CYAN}──────────────────────────────────────────────────${NC}"
+
+    _ping_host() {
+        local _label="$1" _host="$2" _loc="$3"
+        local _out _loss _avg _ms _col
+        _out=$(ping -c 5 -W 2 "$_host" 2>/dev/null)
+        if [[ $? -ne 0 || -z "$_out" ]]; then
+            printf "  %-28s %-12s %-8s %s\n" "$_label" "$_loc" "---" "timeout"
+            return
+        fi
+        _loss=$(echo "$_out" | grep -oP '\d+(?=% packet loss)')
+        _avg=$(echo "$_out"  | grep -oP 'rtt.*= [0-9.]+/\K[0-9.]+')
+        if [[ -z "$_avg" ]]; then
+            _avg=$(echo "$_out" | grep -oP 'avg/[0-9.]+' | cut -d/ -f2)
+        fi
+        _ms="${_avg:-?}"
+        if [[ "$_loss" == "100" ]]; then
+            _col="$RED"
+        elif (( $(echo "$_ms < 150" | bc -l 2>/dev/null || echo 0) )); then
+            _col="$GREEN"
+        elif (( $(echo "$_ms < 300" | bc -l 2>/dev/null || echo 0) )); then
+            _col="$YELLOW"
+        else
+            _col="$RED"
+        fi
+        printf "  %-28s %-12s %-8s " "$_label" "$_loc" "${_loss:-0}%"
+        echo -e "${_col}${_ms} ms${NC}"
+    }
+
+    _ping_host "Cloudflare (1.1.1.1)"      1.1.1.1          "Global"
+    _ping_host "Google (8.8.8.8)"          8.8.8.8          "Global"
+    _ping_host "Quad9 (9.9.9.9)"           9.9.9.9          "Global"
+    _ping_host "CleanBrowsing (185.228.168.9)" 185.228.168.9 "EU"
+    _ping_host "AdGuard (94.140.14.14)"    94.140.14.14     "EU"
+    _ping_host "KT Korea (168.126.63.1)"   168.126.63.1     "Asia"
+
+    echo ""
+    echo -e "$_sep"
+    echo -e "  ${GREEN}Done.${NC}"
+    echo ""
 }
 
 vps_hardware_quality() {
