@@ -24,12 +24,17 @@ done
 
 header() {
     clear
-    echo -e "${CYAN}╔══════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${NC}  ${BOLD}sing-box Proxy Manager${NC}                      ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}  github.com/SatkiExE808/vless-reality-setup  ${CYAN}║${NC}"
-    echo -e "${CYAN}╚══════════════════════════════════════════════╝${NC}"
+    echo -e "${CYAN}╔══════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║${NC}  ${BOLD}sing-box Proxy Manager${NC}                           ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}  ${CYAN}github.com/SatkiExE808/vless-reality-setup${NC}       ${CYAN}║${NC}"
+    echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}"
     echo ""
 }
+
+_menu_sep()  { echo -e "  ${CYAN}────────────────────────────────────────────────────${NC}"; }
+_menu_hdr()  { echo -e "  ${CYAN}──── ${BOLD}$1${NC}${CYAN} $(printf '%.0s─' {1..40} | head -c $((44 - ${#1})))${NC}"; }
+_menu_item() { printf "  ${GREEN}%3s${NC}  ${CYAN}›${NC}  %s\n" "$1" "$2"; }
+_menu_quit() { printf "  ${RED}%3s${NC}  ${CYAN}›${NC}  %s\n" "$1" "$2"; }
 
 confirm()      { read -rp "$(echo -e "${YELLOW}$1 [y/N]: ${NC}")" r; [[ "$r" =~ ^[Yy]$ ]]; }
 pause()        { echo ""; read -rp "$(echo -e "${YELLOW}Press Enter to continue...${NC}")"; }
@@ -427,16 +432,18 @@ EOF
 
 do_install() {
     header
-    echo -e " ${BOLD}Select protocol:${NC}"
+    echo -e "  ${BOLD}Install Protocol${NC}"
     echo ""
-    echo -e "  ${GREEN}1.${NC} VLESS Reality          ${CYAN}(TCP · most secure)${NC}"
-    echo -e "  ${GREEN}2.${NC} Hysteria2               ${CYAN}(UDP · fast)${NC}"
-    echo -e "  ${GREEN}3.${NC} VMess + WebSocket       ${CYAN}(TCP · compatible)${NC}"
-    echo -e "  ${GREEN}4.${NC} TUIC                    ${CYAN}(UDP · fast · QUIC)${NC}"
-    echo -e "  ${GREEN}5.${NC} SOCKS5                  ${CYAN}(TCP · simple)${NC}"
-    echo -e "  ${GREEN}6.${NC} All protocols"
+    _menu_sep
+    printf "  ${GREEN}%3s${NC}  ${CYAN}›${NC}  %-22s ${CYAN}%s${NC}\n"  1  "VLESS Reality"       "TCP · most secure"
+    printf "  ${GREEN}%3s${NC}  ${CYAN}›${NC}  %-22s ${CYAN}%s${NC}\n"  2  "Hysteria2"           "UDP · fast"
+    printf "  ${GREEN}%3s${NC}  ${CYAN}›${NC}  %-22s ${CYAN}%s${NC}\n"  3  "VMess + WebSocket"   "TCP · compatible"
+    printf "  ${GREEN}%3s${NC}  ${CYAN}›${NC}  %-22s ${CYAN}%s${NC}\n"  4  "TUIC"                "UDP · fast · QUIC"
+    printf "  ${GREEN}%3s${NC}  ${CYAN}›${NC}  %-22s ${CYAN}%s${NC}\n"  5  "SOCKS5"              "TCP · simple"
+    printf "  ${GREEN}%3s${NC}  ${CYAN}›${NC}  %s\n"                    6  "All protocols"
+    _menu_sep
     echo ""
-    read -rp "$(echo -e "${YELLOW}Choice [1-6, default 1]: ${NC}")" PC
+    read -rp "$(echo -e "${YELLOW}  Select [1-6, default 1]: ${NC}")" PC
     PC=${PC:-1}
 
     ENABLE_REALITY=false; ENABLE_HY2=false; ENABLE_SOCKS5=false
@@ -522,19 +529,19 @@ do_add_protocol() {
     source "$INFO_FILE"
 
     header
-    echo -e " ${BOLD}Add a protocol:${NC}"
+    echo -e "  ${BOLD}Add Protocol${NC}"
     echo ""
 
-    # Active protocols — shown in main menu order
+    # Active protocols
     local ANY_ACTIVE=false
-    [[ $ENABLE_REALITY == true ]] && echo -e "  ${CYAN}✓  VLESS Reality${NC}"      && ANY_ACTIVE=true
-    [[ $ENABLE_HY2     == true ]] && echo -e "  ${CYAN}✓  Hysteria2${NC}"          && ANY_ACTIVE=true
-    [[ $ENABLE_VMESS   == true ]] && echo -e "  ${CYAN}✓  VMess + WebSocket${NC}"  && ANY_ACTIVE=true
-    [[ $ENABLE_TUIC    == true ]] && echo -e "  ${CYAN}✓  TUIC${NC}"               && ANY_ACTIVE=true
-    [[ $ENABLE_SOCKS5  == true ]] && echo -e "  ${CYAN}✓  SOCKS5${NC}"             && ANY_ACTIVE=true
+    [[ $ENABLE_REALITY == true ]] && echo -e "  ${GREEN}✓${NC}  VLESS Reality"     && ANY_ACTIVE=true
+    [[ $ENABLE_HY2     == true ]] && echo -e "  ${GREEN}✓${NC}  Hysteria2"         && ANY_ACTIVE=true
+    [[ $ENABLE_VMESS   == true ]] && echo -e "  ${GREEN}✓${NC}  VMess + WebSocket" && ANY_ACTIVE=true
+    [[ $ENABLE_TUIC    == true ]] && echo -e "  ${GREEN}✓${NC}  TUIC"              && ANY_ACTIVE=true
+    [[ $ENABLE_SOCKS5  == true ]] && echo -e "  ${GREEN}✓${NC}  SOCKS5"            && ANY_ACTIVE=true
     [[ $ANY_ACTIVE == true ]] && echo ""
 
-    # Available protocols — in same order
+    # Available to add
     local -a _NAMES _DESCS _IDS
     [[ $ENABLE_REALITY != true ]] && _NAMES+=("VLESS Reality")     && _DESCS+=("TCP · most secure") && _IDS+=("reality")
     [[ $ENABLE_HY2     != true ]] && _NAMES+=("Hysteria2")         && _DESCS+=("UDP · fast")        && _IDS+=("hy2")
@@ -547,13 +554,16 @@ do_add_protocol() {
         return
     fi
 
+    _menu_sep
     for i in "${!_NAMES[@]}"; do
-        printf "  ${GREEN}%d.${NC}  %-22s ${CYAN}(%s)${NC}\n" $((i+1)) "${_NAMES[$i]}" "${_DESCS[$i]}"
+        printf "  ${GREEN}%3d${NC}  ${CYAN}›${NC}  %-22s ${CYAN}%s${NC}\n" \
+            $((i+1)) "${_NAMES[$i]}" "${_DESCS[$i]}"
     done
-    echo -e "  ${RED}0.${NC}  Back"
+    _menu_sep
+    _menu_quit  0  "Back"
 
     echo ""
-    read -rp "$(echo -e "${YELLOW}Choice [0-${#_NAMES[@]}]: ${NC}")" ADD_CHOICE
+    read -rp "$(echo -e "${YELLOW}  Select: ${NC}")" ADD_CHOICE
 
     [[ "$ADD_CHOICE" == "0" ]] && return
     if ! [[ "$ADD_CHOICE" =~ ^[0-9]+$ ]] || (( ADD_CHOICE < 1 || ADD_CHOICE > ${#_NAMES[@]} )); then
@@ -637,16 +647,17 @@ do_delete_protocol() {
     [[ $ENABLE_SOCKS5  == true ]] && _NAMES+=("SOCKS5")            && _IDS+=("socks5")
 
     header
-    echo -e " ${BOLD}Remove a protocol:${NC}"
+    echo -e "  ${BOLD}Remove Protocol${NC}"
     echo ""
-
+    _menu_sep
     for i in "${!_NAMES[@]}"; do
-        echo -e "  ${GREEN}$((i+1)).${NC}  ${_NAMES[$i]}"
+        _menu_item $((i+1)) "${_NAMES[$i]}"
     done
-    echo -e "  ${RED}0.${NC}  Back"
-
+    _menu_sep
     echo ""
-    read -rp "$(echo -e "${YELLOW}Choice [0-${#_NAMES[@]}]: ${NC}")" DEL_CHOICE
+    _menu_quit  0  "Back"
+    echo ""
+    read -rp "$(echo -e "${YELLOW}  Select: ${NC}")" DEL_CHOICE
 
     [[ "$DEL_CHOICE" == "0" ]] && return
     if ! [[ "$DEL_CHOICE" =~ ^[0-9]+$ ]] || (( DEL_CHOICE < 1 || DEL_CHOICE > ${#_NAMES[@]} )); then
@@ -727,7 +738,7 @@ do_update() {
 
 do_bbr() {
     header
-    echo -e " ${BOLD}BBR Congestion Control${NC}"
+    echo -e "  ${BOLD}BBR Congestion Control${NC}"
     echo ""
 
     local CC QDISC
@@ -735,19 +746,23 @@ do_bbr() {
     QDISC=$(sysctl -n net.core.default_qdisc 2>/dev/null)
 
     if [[ "$CC" == "bbr" ]]; then
-        echo -e "  Status    : ${GREEN}● enabled${NC}"
-        printf "  %-10s ${GREEN}%s${NC}\n" "Qdisc:"   "$QDISC"
+        printf "  %-10s ${GREEN}● enabled${NC}\n"  "Status :"
+        printf "  %-10s ${GREEN}%s${NC}\n"          "Qdisc  :" "$QDISC"
         echo ""
-        echo -e "  ${GREEN}1.${NC}  Disable BBR  (revert to cubic)"
+        _menu_sep
+        _menu_item  1  "Disable BBR  (revert to cubic)"
     else
-        echo -e "  Status    : ${YELLOW}● disabled${NC}"
-        printf "  %-10s ${YELLOW}%s${NC}\n" "Current:" "$CC"
+        printf "  %-10s ${YELLOW}● disabled${NC}\n" "Status :"
+        printf "  %-10s ${YELLOW}%s${NC}\n"          "Current:" "$CC"
         echo ""
-        echo -e "  ${GREEN}1.${NC}  Enable BBR"
+        _menu_sep
+        _menu_item  1  "Enable BBR"
     fi
-    echo -e "  ${RED}0.${NC}  Back"
+    _menu_sep
     echo ""
-    read -rp "$(echo -e "${YELLOW}Choice: ${NC}")" BBR_OPT
+    _menu_quit  0  "Back"
+    echo ""
+    read -rp "$(echo -e "${YELLOW}  Select: ${NC}")" BBR_OPT
 
     case "$BBR_OPT" in
         0) return ;;
@@ -921,18 +936,21 @@ vps_check_dns() {
 
 vps_change_dns() {
     header
-    echo -e " ${BOLD}Change DNS${NC}"
+    echo -e "  ${BOLD}Change DNS${NC}"
     echo ""
-    echo -e "  ${GREEN}1.${NC}  Google        ${CYAN}8.8.8.8 / 8.8.4.4${NC}"
-    echo -e "  ${GREEN}2.${NC}  Cloudflare    ${CYAN}1.1.1.1 / 1.0.0.1${NC}"
-    echo -e "  ${GREEN}3.${NC}  OpenDNS       ${CYAN}208.67.222.222 / 208.67.220.220${NC}"
-    echo -e "  ${GREEN}4.${NC}  Quad9         ${CYAN}9.9.9.9 / 149.112.112.112${NC}"
-    echo -e "  ${GREEN}5.${NC}  AdGuard       ${CYAN}94.140.14.14 / 94.140.15.15${NC}"
-    echo -e "  ${GREEN}6.${NC}  Comodo        ${CYAN}8.26.56.26 / 8.20.247.20${NC}"
-    echo -e "  ${GREEN}7.${NC}  Custom"
-    echo -e "  ${RED}0.${NC}  Back"
+    _menu_sep
+    printf "  ${GREEN}%3s${NC}  ${CYAN}›${NC}  %-14s ${CYAN}%s${NC}\n"  1  "Google"      "8.8.8.8 / 8.8.4.4"
+    printf "  ${GREEN}%3s${NC}  ${CYAN}›${NC}  %-14s ${CYAN}%s${NC}\n"  2  "Cloudflare"  "1.1.1.1 / 1.0.0.1"
+    printf "  ${GREEN}%3s${NC}  ${CYAN}›${NC}  %-14s ${CYAN}%s${NC}\n"  3  "OpenDNS"     "208.67.222.222 / 208.67.220.220"
+    printf "  ${GREEN}%3s${NC}  ${CYAN}›${NC}  %-14s ${CYAN}%s${NC}\n"  4  "Quad9"       "9.9.9.9 / 149.112.112.112"
+    printf "  ${GREEN}%3s${NC}  ${CYAN}›${NC}  %-14s ${CYAN}%s${NC}\n"  5  "AdGuard"     "94.140.14.14 / 94.140.15.15"
+    printf "  ${GREEN}%3s${NC}  ${CYAN}›${NC}  %-14s ${CYAN}%s${NC}\n"  6  "Comodo"      "8.26.56.26 / 8.20.247.20"
+    _menu_item  7  "Custom"
+    _menu_sep
     echo ""
-    read -rp "$(echo -e "${YELLOW}Choice: ${NC}")" _DC
+    _menu_quit  0  "Back"
+    echo ""
+    read -rp "$(echo -e "${YELLOW}  Select: ${NC}")" _DC
 
     local _D1 _D2
     case "$_DC" in
@@ -1082,7 +1100,7 @@ vps_node_quality() {
 
 vps_fail2ban() {
     header
-    echo -e " ${BOLD}Fail2Ban${NC}"
+    echo -e "  ${BOLD}Fail2Ban${NC}"
     echo ""
 
     local _installed=0
@@ -1115,13 +1133,16 @@ vps_fail2ban() {
         fi
 
         echo ""
-        echo -e "  ${GREEN}1.${NC}  Restart fail2ban"
-        echo -e "  ${GREEN}2.${NC}  Stop fail2ban"
-        [[ "$_status" != "active" ]] && echo -e "  ${GREEN}3.${NC}  Start fail2ban"
-        echo -e "  ${RED}9.${NC}  Uninstall fail2ban"
-        echo -e "  ${RED}0.${NC}  Back"
+        _menu_sep
+        _menu_item  1  "Restart fail2ban"
+        _menu_item  2  "Stop fail2ban"
+        [[ "$_status" != "active" ]] && _menu_item  3  "Start fail2ban"
+        _menu_quit  9  "Uninstall fail2ban"
+        _menu_sep
         echo ""
-        read -rp "$(echo -e "${YELLOW}Choice: ${NC}")" _FC
+        _menu_quit  0  "Back"
+        echo ""
+        read -rp "$(echo -e "${YELLOW}  Select: ${NC}")" _FC
         case "$_FC" in
             1) systemctl restart fail2ban && echo -e "${GREEN}✓ Restarted.${NC}" ;;
             2) systemctl stop    fail2ban && echo -e "${YELLOW}● Stopped.${NC}" ;;
@@ -1179,19 +1200,25 @@ EOF
 do_vps_tools() {
     while true; do
         header
-        echo -e " ${BOLD}VPS Tools${NC}"
+        echo -e "  ${BOLD}VPS Tools${NC}"
         echo ""
-        echo -e "  ${GREEN}1.${NC}  Check IP Info"
-        echo -e "  ${GREEN}2.${NC}  Speed Test"
-        echo -e "  ${GREEN}3.${NC}  Check DNS"
-        echo -e "  ${GREEN}4.${NC}  Change DNS"
-        echo -e "  ${GREEN}5.${NC}  Node Quality Check"
-        echo -e "  ${GREEN}6.${NC}  System Update"
-        echo -e "  ${GREEN}7.${NC}  Fail2Ban"
+        _menu_hdr "Network"
+        _menu_item  1  "Check IP Info"
+        _menu_item  2  "Speed Test"
+        _menu_item  3  "Check DNS"
+        _menu_item  4  "Change DNS"
         echo ""
-        echo -e "  ${RED}0.${NC}  Back"
+        _menu_hdr "Diagnostics"
+        _menu_item  5  "Node Quality Check"
         echo ""
-        read -rp "$(echo -e "${YELLOW}Choice [0-7]: ${NC}")" _VT
+        _menu_hdr "Maintenance"
+        _menu_item  6  "System Update"
+        _menu_item  7  "Fail2Ban"
+        _menu_sep
+        echo ""
+        _menu_quit  0  "Back"
+        echo ""
+        read -rp "$(echo -e "${YELLOW}  Select: ${NC}")" _VT
 
         case "$_VT" in
             1)  header; vps_check_ip;       pause ;;
@@ -1239,42 +1266,59 @@ EOF
 main_menu() {
     install_shortcut
     while true; do
-        header
-
+        clear
+        local _SB_STATUS _SB_VER
         if is_installed; then
-            local SB_STATUS SB_VER
-            SB_STATUS=$(systemctl is-active sing-box 2>/dev/null)
-            SB_VER=$("$BIN" version 2>/dev/null | grep -oP '[\d]+\.[\d]+\.[\d]+' | head -1)
-            [[ "$SB_STATUS" == "active" ]] \
-                && echo -e "  Status : ${GREEN}● running${NC}   Version : ${GREEN}${SB_VER}${NC}" \
-                || echo -e "  Status : ${RED}● stopped${NC}   Version : ${SB_VER}"
-        else
-            echo -e "  Status : ${YELLOW}not installed${NC}"
+            _SB_STATUS=$(systemctl is-active sing-box 2>/dev/null)
+            _SB_VER=$("$BIN" version 2>/dev/null | grep -oP '[\d]+\.[\d]+\.[\d]+' | head -1)
         fi
+
+        echo -e "${CYAN}╔══════════════════════════════════════════════════╗${NC}"
+        echo -e "${CYAN}║${NC}  ${BOLD}sing-box Proxy Manager${NC}                           ${CYAN}║${NC}"
+        echo -e "${CYAN}║${NC}  ${CYAN}github.com/SatkiExE808/vless-reality-setup${NC}       ${CYAN}║${NC}"
+        echo -e "${CYAN}╠══════════════════════════════════════════════════╣${NC}"
+        if is_installed; then
+            if [[ "$_SB_STATUS" == "active" ]]; then
+                echo -e "${CYAN}║${NC}  Status  ${GREEN}● running${NC}      Version  ${GREEN}${_SB_VER:-?}${NC}$(printf '%*s' $((19 - ${#_SB_VER})) '')${CYAN}║${NC}"
+            else
+                echo -e "${CYAN}║${NC}  Status  ${RED}● stopped${NC}      Version  ${_SB_VER:-?}$(printf '%*s' $((19 - ${#_SB_VER})) '')${CYAN}║${NC}"
+            fi
+        else
+            echo -e "${CYAN}║${NC}  Status  ${YELLOW}not installed${NC}                            ${CYAN}║${NC}"
+        fi
+        echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}"
         echo ""
 
         if ! is_installed; then
-            echo -e "  ${GREEN}1.${NC} Install"
+            _menu_sep
+            _menu_item  1  "Install sing-box"
+            _menu_sep
             echo ""
-            echo -e "  ${RED}0.${NC} Exit"
+            _menu_quit  0  "Exit"
         else
-            echo -e "  ${GREEN}1.${NC} Show Config & Links"
-            echo -e "  ${GREEN}2.${NC} Add Protocol"
-            echo -e "  ${GREEN}3.${NC} Remove Protocol"
-            echo -e "  ${GREEN}4.${NC} Restart Service"
-            echo -e "  ${GREEN}5.${NC} Stop / Start Service"
-            echo -e "  ${GREEN}6.${NC} View Logs"
-            echo -e "  ${GREEN}7.${NC} Update sing-box"
-            echo -e "  ${GREEN}8.${NC} BBR Enable / Disable"
-            echo -e "  ${GREEN}9.${NC} VPS Tools"
-            echo -e "  ${GREEN}10.${NC} Reinstall"
-            echo -e "  ${RED}11.${NC} Uninstall"
+            _menu_hdr "Proxy"
+            _menu_item  1  "Show Config & Links"
+            _menu_item  2  "Add Protocol"
+            _menu_item  3  "Remove Protocol"
             echo ""
-            echo -e "  ${RED}0.${NC} Exit"
+            _menu_hdr "Service"
+            _menu_item  4  "Restart Service"
+            _menu_item  5  "Stop / Start Service"
+            _menu_item  6  "View Logs"
+            echo ""
+            _menu_hdr "System"
+            _menu_item  7  "Update sing-box"
+            _menu_item  8  "BBR Enable / Disable"
+            _menu_item  9  "VPS Tools"
+            _menu_item 10  "Reinstall"
+            _menu_quit 11  "Uninstall"
+            _menu_sep
+            echo ""
+            _menu_quit  0  "Exit"
         fi
 
         echo ""
-        read -rp "$(echo -e "${YELLOW}Select [0-11]: ${NC}")" OPT
+        read -rp "$(echo -e "${YELLOW}  Select: ${NC}")" OPT
 
         case "$OPT" in
             1)
