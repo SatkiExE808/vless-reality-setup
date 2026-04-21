@@ -4,8 +4,10 @@ A clean, interactive installer and manager for [sing-box](https://github.com/Sag
 
 - Interactive menu — install, manage, update, uninstall
 - Auto-installs latest sing-box binary
-- Mix and match protocols on the same server
+- Mix and match protocols — add or remove any protocol at any time
 - QR code output for mobile clients
+- BBR congestion control toggle (enable / disable)
+- `sb` shortcut installed automatically for quick access
 - Supports `amd64` and `arm64`
 - Tested on Debian 11/12 and Ubuntu 20.04+
 
@@ -17,7 +19,7 @@ A clean, interactive installer and manager for [sing-box](https://github.com/Sag
 bash <(curl -sL https://raw.githubusercontent.com/SatkiExE808/vless-reality-setup/main/setup.sh)
 ```
 
-> Requires root. Run on a fresh Debian/Ubuntu VPS.
+> Requires root. After the first run, type `sb` anywhere to reopen the manager.
 
 ---
 
@@ -51,8 +53,9 @@ bash <(curl -sL https://raw.githubusercontent.com/SatkiExE808/vless-reality-setu
   5. Stop / Start Service
   6. View Logs
   7. Update sing-box
-  8. Reinstall
-  9. Uninstall
+  8. BBR Enable / Disable
+  9. Reinstall
+  10. Uninstall
 
   0. Exit
 ```
@@ -97,14 +100,25 @@ QUIC-based protocol with BBR congestion control and self-signed TLS. Low latency
 
 ---
 
+## BBR
+
+Option **8** in the management menu toggles BBR on or off system-wide.
+
+- **Enable** — loads the `tcp_bbr` kernel module, sets `fq` qdisc, writes `/etc/sysctl.d/99-bbr.conf` for persistence across reboots
+- **Disable** — reverts to `cubic` + `pfifo_fast`, removes the persistent config
+
+---
+
 ## Installation Details
 
 | Path | Purpose |
 |---|---|
 | `/usr/local/bin/sing-box` | sing-box binary |
+| `/usr/local/bin/sb` | Quick-access shortcut |
 | `/etc/sing-box/config.json` | Active config |
 | `/etc/sing-box/.info` | Saved credentials |
 | `/etc/sing-box/cert.pem` | TLS cert (Hysteria2 / TUIC) |
+| `/etc/sysctl.d/99-bbr.conf` | BBR persistent config (if enabled) |
 | `/etc/systemd/system/sing-box.service` | systemd service |
 
 ---
@@ -139,6 +153,9 @@ Use the displayed IP, port, and credentials directly in your browser or app's pr
 ## Service Management
 
 ```bash
+# Open manager
+sb
+
 # Status
 systemctl status sing-box
 
@@ -150,14 +167,6 @@ journalctl -u sing-box -f
 
 # Stop
 systemctl stop sing-box
-```
-
----
-
-## Re-run the Manager
-
-```bash
-bash <(curl -sL https://raw.githubusercontent.com/SatkiExE808/vless-reality-setup/main/setup.sh)
 ```
 
 ---
