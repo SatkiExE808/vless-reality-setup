@@ -391,9 +391,9 @@ do_install() {
     echo ""
     echo -e "  ${GREEN}1.${NC} VLESS Reality          ${CYAN}(TCP · most secure)${NC}"
     echo -e "  ${GREEN}2.${NC} Hysteria2               ${CYAN}(UDP · fast)${NC}"
-    echo -e "  ${GREEN}3.${NC} SOCKS5                  ${CYAN}(TCP · simple)${NC}"
-    echo -e "  ${GREEN}4.${NC} VMess + WebSocket       ${CYAN}(TCP · compatible)${NC}"
-    echo -e "  ${GREEN}5.${NC} TUIC                    ${CYAN}(UDP · fast · QUIC)${NC}"
+    echo -e "  ${GREEN}3.${NC} VMess + WebSocket       ${CYAN}(TCP · compatible)${NC}"
+    echo -e "  ${GREEN}4.${NC} TUIC                    ${CYAN}(UDP · fast · QUIC)${NC}"
+    echo -e "  ${GREEN}5.${NC} SOCKS5                  ${CYAN}(TCP · simple)${NC}"
     echo -e "  ${GREEN}6.${NC} All protocols"
     echo ""
     read -rp "$(echo -e "${YELLOW}Choice [1-6, default 1]: ${NC}")" PC
@@ -408,9 +408,9 @@ do_install() {
     case "$PC" in
         1) ENABLE_REALITY=true ;;
         2) ENABLE_HY2=true ;;
-        3) ENABLE_SOCKS5=true ;;
-        4) ENABLE_VMESS=true ;;
-        5) ENABLE_TUIC=true ;;
+        3) ENABLE_VMESS=true ;;
+        4) ENABLE_TUIC=true ;;
+        5) ENABLE_SOCKS5=true ;;
         6) ENABLE_REALITY=true; ENABLE_HY2=true; ENABLE_SOCKS5=true; ENABLE_VMESS=true; ENABLE_TUIC=true ;;
         *) echo -e "${RED}Invalid.${NC}"; return ;;
     esac
@@ -512,9 +512,9 @@ do_add_protocol() {
     local -a _NAMES _DESCS _IDS
     [[ $ENABLE_REALITY != true ]] && _NAMES+=("VLESS Reality")     && _DESCS+=("TCP · most secure") && _IDS+=("reality")
     [[ $ENABLE_HY2     != true ]] && _NAMES+=("Hysteria2")         && _DESCS+=("UDP · fast")        && _IDS+=("hy2")
-    [[ $ENABLE_SOCKS5  != true ]] && _NAMES+=("SOCKS5")            && _DESCS+=("TCP · simple")      && _IDS+=("socks5")
     [[ $ENABLE_VMESS   != true ]] && _NAMES+=("VMess + WebSocket") && _DESCS+=("TCP · compatible")  && _IDS+=("vmess")
     [[ $ENABLE_TUIC    != true ]] && _NAMES+=("TUIC")              && _DESCS+=("UDP · fast · QUIC") && _IDS+=("tuic")
+    [[ $ENABLE_SOCKS5  != true ]] && _NAMES+=("SOCKS5")            && _DESCS+=("TCP · simple")      && _IDS+=("socks5")
 
     if [[ ${#_NAMES[@]} -eq 0 ]]; then
         echo -e "  ${YELLOW}All protocols are already active.${NC}"
@@ -611,9 +611,9 @@ do_delete_protocol() {
     local -a _NAMES _IDS
     [[ $ENABLE_REALITY == true ]] && _NAMES+=("VLESS Reality")     && _IDS+=("reality")
     [[ $ENABLE_HY2     == true ]] && _NAMES+=("Hysteria2")         && _IDS+=("hy2")
-    [[ $ENABLE_SOCKS5  == true ]] && _NAMES+=("SOCKS5")            && _IDS+=("socks5")
     [[ $ENABLE_VMESS   == true ]] && _NAMES+=("VMess + WebSocket") && _IDS+=("vmess")
     [[ $ENABLE_TUIC    == true ]] && _NAMES+=("TUIC")              && _IDS+=("tuic")
+    [[ $ENABLE_SOCKS5  == true ]] && _NAMES+=("SOCKS5")            && _IDS+=("socks5")
 
     header
     echo -e " ${BOLD}Remove a protocol:${NC}"

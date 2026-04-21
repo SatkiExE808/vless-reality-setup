@@ -28,9 +28,9 @@ bash <(curl -sL https://raw.githubusercontent.com/SatkiExE808/vless-reality-setu
 ```
   1. VLESS Reality          (TCP · most secure)
   2. Hysteria2              (UDP · fast)
-  3. SOCKS5                 (TCP · simple)
-  4. VMess + WebSocket      (TCP · compatible)
-  5. TUIC                   (UDP · fast · QUIC)
+  3. VMess + WebSocket      (TCP · compatible)
+  4. TUIC                   (UDP · fast · QUIC)
+  5. SOCKS5                 (TCP · simple)
   6. All protocols
 ```
 
