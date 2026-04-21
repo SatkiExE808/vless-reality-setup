@@ -1,5 +1,5 @@
 #!/bin/bash
-# sing-box Manager — VLESS Reality + Hysteria2 + SOCKS5
+# sing-box Manager — VLESS Reality + Hysteria2 + SOCKS5 + VMess/WS + TUIC
 # github.com/SatkiExE808/vless-reality-setup
 
 RED='\033[0;31m';   GREEN='\033[0;32m';  YELLOW='\033[1;33m'
@@ -69,7 +69,7 @@ install_binary() {
     echo -e "${GREEN}✓ Installed sing-box ${VER}${NC}"
 }
 
-# ── TLS cert (Hysteria2) ───────────────────────────────────────────────────────
+# ── TLS cert (Hysteria2 / TUIC) ────────────────────────────────────────────────
 
 gen_cert() {
     openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
@@ -144,6 +144,41 @@ EOF
     fi
 }
 
+json_vmess() {
+    cat << EOF
+    {
+      "type": "vmess",
+      "tag": "vmess-ws",
+      "listen": "::",
+      "listen_port": ${VMESS_PORT},
+      "users": [{ "uuid": "${VMESS_UUID}", "alterId": 0 }],
+      "transport": {
+        "type": "ws",
+        "path": "/${VMESS_PATH}"
+      }
+    }
+EOF
+}
+
+json_tuic() {
+    cat << EOF
+    {
+      "type": "tuic",
+      "tag": "tuic",
+      "listen": "::",
+      "listen_port": ${TUIC_PORT},
+      "users": [{ "uuid": "${TUIC_UUID}", "password": "${TUIC_PASS}" }],
+      "congestion_control": "bbr",
+      "tls": {
+        "enabled": true,
+        "alpn": ["h3"],
+        "certificate_path": "${CFG_DIR}/cert.pem",
+        "key_path": "${CFG_DIR}/key.pem"
+      }
+    }
+EOF
+}
+
 # ── Write config ───────────────────────────────────────────────────────────────
 
 write_config() {
@@ -151,6 +186,8 @@ write_config() {
     [[ $ENABLE_REALITY  == true ]] && parts+=("$(json_vless)")
     [[ $ENABLE_HY2      == true ]] && parts+=("$(json_hy2)")
     [[ $ENABLE_SOCKS5   == true ]] && parts+=("$(json_socks5)")
+    [[ $ENABLE_VMESS    == true ]] && parts+=("$(json_vmess)")
+    [[ $ENABLE_TUIC     == true ]] && parts+=("$(json_tuic)")
 
     local inbounds=""
     for i in "${!parts[@]}"; do
@@ -269,6 +306,41 @@ show_info() {
         fi
     fi
 
+    if [[ $ENABLE_VMESS == true ]]; then
+        local VMESS_JSON="{\"v\":\"2\",\"ps\":\"VMess-${SERVER_IP}\",\"add\":\"${SERVER_IP}\",\"port\":${VMESS_PORT},\"id\":\"${VMESS_UUID}\",\"aid\":0,\"net\":\"ws\",\"type\":\"none\",\"host\":\"\",\"path\":\"/${VMESS_PATH}\",\"tls\":\"\"}"
+        VMESS_LINK="vmess://$(echo -n "$VMESS_JSON" | base64 -w 0)"
+        echo ""
+        echo -e " ${BOLD}${YELLOW}◆ VMess + WebSocket${NC}"
+        echo -e "${CYAN}──────────────────────────────────────────────────${NC}"
+        printf "  %-12s ${GREEN}%s${NC}\n" "Address:"   "$SERVER_IP"
+        printf "  %-12s ${GREEN}%s${NC}\n" "Port:"      "$VMESS_PORT"
+        printf "  %-12s ${GREEN}%s${NC}\n" "UUID:"      "$VMESS_UUID"
+        printf "  %-12s ${GREEN}%s${NC}\n" "Network:"   "ws"
+        printf "  %-12s ${GREEN}%s${NC}\n" "Path:"      "/${VMESS_PATH}"
+        printf "  %-12s ${GREEN}%s${NC}\n" "TLS:"       "none"
+        echo ""
+        echo -e "  ${YELLOW}▶ Import Link:${NC}"
+        echo -e "  ${VMESS_LINK}"
+        show_qr "$VMESS_LINK"
+    fi
+
+    if [[ $ENABLE_TUIC == true ]]; then
+        TUIC_LINK="tuic://${TUIC_UUID}:${TUIC_PASS}@${SERVER_IP}:${TUIC_PORT}?congestion_control=bbr&alpn=h3&allow_insecure=1&sni=${SNI}#TUIC-${SERVER_IP}"
+        echo ""
+        echo -e " ${BOLD}${PURPLE}◆ TUIC v5${NC}"
+        echo -e "${CYAN}──────────────────────────────────────────────────${NC}"
+        printf "  %-12s ${GREEN}%s${NC}\n" "Address:"   "$SERVER_IP"
+        printf "  %-12s ${GREEN}%s${NC}\n" "Port:"      "$TUIC_PORT"
+        printf "  %-12s ${GREEN}%s${NC}\n" "UUID:"      "$TUIC_UUID"
+        printf "  %-12s ${GREEN}%s${NC}\n" "Password:"  "$TUIC_PASS"
+        printf "  %-12s ${GREEN}%s${NC}\n" "Congestion:" "bbr"
+        printf "  %-12s ${GREEN}%s${NC}\n" "TLS:"       "self-signed (insecure=1)"
+        echo ""
+        echo -e "  ${YELLOW}▶ Import Link:${NC}"
+        echo -e "  ${TUIC_LINK}"
+        show_qr "$TUIC_LINK"
+    fi
+
     echo ""
     echo -e "${CYAN}══════════════════════════════════════════════════${NC}"
     SB_STATUS=$(systemctl is-active sing-box 2>/dev/null)
@@ -277,6 +349,37 @@ show_info() {
         && echo -e "  Service : ${GREEN}● running${NC}   Version : ${GREEN}${SB_VER}${NC}" \
         || echo -e "  Service : ${RED}● stopped${NC}   Version : ${SB_VER}"
     echo -e "${CYAN}══════════════════════════════════════════════════${NC}"
+}
+
+# ── Write info file ────────────────────────────────────────────────────────────
+
+write_info() {
+    cat > "$INFO_FILE" << EOF
+ENABLE_REALITY=${ENABLE_REALITY}
+ENABLE_HY2=${ENABLE_HY2}
+ENABLE_SOCKS5=${ENABLE_SOCKS5}
+ENABLE_VMESS=${ENABLE_VMESS}
+ENABLE_TUIC=${ENABLE_TUIC}
+SERVER_IP=${SERVER_IP}
+UUID=${UUID}
+PRIVATE_KEY=${PRIVATE_KEY}
+PUBLIC_KEY=${PUBLIC_KEY}
+SHORT_ID=${SHORT_ID}
+VLESS_PORT=${VLESS_PORT:-443}
+HY2_PORT=${HY2_PORT:-8443}
+HY2_PASS=${HY2_PASS}
+SOCKS_PORT=${SOCKS_PORT:-1080}
+SOCKS_USER=${SOCKS_USER}
+SOCKS_PASS=${SOCKS_PASS}
+VMESS_PORT=${VMESS_PORT:-8080}
+VMESS_UUID=${VMESS_UUID}
+VMESS_PATH=${VMESS_PATH}
+TUIC_PORT=${TUIC_PORT:-8853}
+TUIC_UUID=${TUIC_UUID}
+TUIC_PASS=${TUIC_PASS}
+CERT_FP=${CERT_FP}
+MAIN_IP=${MAIN_IP}
+EOF
 }
 
 # ── Install flow ───────────────────────────────────────────────────────────────
@@ -288,8 +391,8 @@ do_install() {
     echo -e "  ${GREEN}1.${NC} VLESS Reality          ${CYAN}(TCP · most secure)${NC}"
     echo -e "  ${GREEN}2.${NC} Hysteria2               ${CYAN}(UDP · fast)${NC}"
     echo -e "  ${GREEN}3.${NC} SOCKS5                  ${CYAN}(TCP · simple)${NC}"
-    echo -e "  ${GREEN}4.${NC} VLESS Reality + Hysteria2"
-    echo -e "  ${GREEN}5.${NC} VLESS Reality + SOCKS5"
+    echo -e "  ${GREEN}4.${NC} VMess + WebSocket       ${CYAN}(TCP · compatible)${NC}"
+    echo -e "  ${GREEN}5.${NC} TUIC                    ${CYAN}(UDP · fast · QUIC)${NC}"
     echo -e "  ${GREEN}6.${NC} All protocols"
     echo ""
     read -rp "$(echo -e "${YELLOW}Choice [1-6, default 1]: ${NC}")" PC
@@ -298,14 +401,16 @@ do_install() {
     ENABLE_REALITY=false
     ENABLE_HY2=false
     ENABLE_SOCKS5=false
+    ENABLE_VMESS=false
+    ENABLE_TUIC=false
 
     case "$PC" in
         1) ENABLE_REALITY=true ;;
         2) ENABLE_HY2=true ;;
         3) ENABLE_SOCKS5=true ;;
-        4) ENABLE_REALITY=true; ENABLE_HY2=true ;;
-        5) ENABLE_REALITY=true; ENABLE_SOCKS5=true ;;
-        6) ENABLE_REALITY=true; ENABLE_HY2=true; ENABLE_SOCKS5=true ;;
+        4) ENABLE_VMESS=true ;;
+        5) ENABLE_TUIC=true ;;
+        6) ENABLE_REALITY=true; ENABLE_HY2=true; ENABLE_SOCKS5=true; ENABLE_VMESS=true; ENABLE_TUIC=true ;;
         *) echo -e "${RED}Invalid.${NC}"; return ;;
     esac
 
@@ -331,6 +436,14 @@ do_install() {
             SOCKS_PASS=""
         fi
     fi
+    if [[ $ENABLE_VMESS == true ]]; then
+        read -rp "$(echo -e "${YELLOW}VMess+WS port [default: 8080]: ${NC}")" VMESS_PORT
+        VMESS_PORT=${VMESS_PORT:-8080}
+    fi
+    if [[ $ENABLE_TUIC == true ]]; then
+        read -rp "$(echo -e "${YELLOW}TUIC port [default: 8853]: ${NC}")" TUIC_PORT
+        TUIC_PORT=${TUIC_PORT:-8853}
+    fi
 
     detect_ip
     detect_main_ip
@@ -349,34 +462,20 @@ do_install() {
     PUBLIC_KEY=$(echo  "$KEYPAIR" | awk '/PublicKey/{print $2}')
     SHORT_ID=$(openssl rand -hex 8)
     HY2_PASS=$(openssl rand -hex 16)
+    VMESS_UUID=$("$BIN" generate uuid)
+    VMESS_PATH=$(openssl rand -hex 4)
+    TUIC_UUID=$("$BIN" generate uuid)
+    TUIC_PASS=$(openssl rand -hex 16)
     CERT_FP=""
 
-    [[ $ENABLE_HY2 == true ]] && gen_cert
+    [[ $ENABLE_HY2 == true || $ENABLE_TUIC == true ]] && gen_cert
 
     write_config
 
     "$BIN" check -c "$CFG_FILE" || { echo -e "${RED}Config check failed.${NC}"; exit 1; }
     echo -e "${GREEN}✓ Config valid${NC}"
 
-    cat > "$INFO_FILE" << EOF
-ENABLE_REALITY=${ENABLE_REALITY}
-ENABLE_HY2=${ENABLE_HY2}
-ENABLE_SOCKS5=${ENABLE_SOCKS5}
-SERVER_IP=${SERVER_IP}
-UUID=${UUID}
-PRIVATE_KEY=${PRIVATE_KEY}
-PUBLIC_KEY=${PUBLIC_KEY}
-SHORT_ID=${SHORT_ID}
-VLESS_PORT=${VLESS_PORT:-443}
-HY2_PORT=${HY2_PORT:-8443}
-HY2_PASS=${HY2_PASS}
-SOCKS_PORT=${SOCKS_PORT:-1080}
-SOCKS_USER=${SOCKS_USER}
-SOCKS_PASS=${SOCKS_PASS}
-CERT_FP=${CERT_FP}
-MAIN_IP=${MAIN_IP}
-EOF
-
+    write_info
     write_service
 
     if systemctl is-active --quiet sing-box; then
@@ -398,12 +497,16 @@ do_add_protocol() {
     header
     echo -e " ${BOLD}Add a protocol:${NC}"
     echo ""
-    [[ $ENABLE_REALITY  == true ]] && echo -e "  ${CYAN}·${NC} VLESS Reality  (already active)" \
-                                   || echo -e "  ${GREEN}1.${NC} VLESS Reality"
-    [[ $ENABLE_HY2      == true ]] && echo -e "  ${CYAN}·${NC} Hysteria2      (already active)" \
-                                   || echo -e "  ${GREEN}2.${NC} Hysteria2"
-    [[ $ENABLE_SOCKS5   == true ]] && echo -e "  ${CYAN}·${NC} SOCKS5         (already active)" \
-                                   || echo -e "  ${GREEN}3.${NC} SOCKS5"
+    [[ $ENABLE_REALITY == true ]] && echo -e "  ${CYAN}·${NC} VLESS Reality       (already active)" \
+                                  || echo -e "  ${GREEN}1.${NC} VLESS Reality"
+    [[ $ENABLE_HY2     == true ]] && echo -e "  ${CYAN}·${NC} Hysteria2           (already active)" \
+                                  || echo -e "  ${GREEN}2.${NC} Hysteria2"
+    [[ $ENABLE_SOCKS5  == true ]] && echo -e "  ${CYAN}·${NC} SOCKS5              (already active)" \
+                                  || echo -e "  ${GREEN}3.${NC} SOCKS5"
+    [[ $ENABLE_VMESS   == true ]] && echo -e "  ${CYAN}·${NC} VMess + WebSocket   (already active)" \
+                                  || echo -e "  ${GREEN}4.${NC} VMess + WebSocket"
+    [[ $ENABLE_TUIC    == true ]] && echo -e "  ${CYAN}·${NC} TUIC                (already active)" \
+                                  || echo -e "  ${GREEN}5.${NC} TUIC"
     echo ""
     read -rp "$(echo -e "${YELLOW}Choice: ${NC}")" ADD_CHOICE
 
@@ -438,6 +541,21 @@ do_add_protocol() {
                 SOCKS_USER=""; SOCKS_PASS=""
             fi
             ENABLE_SOCKS5=true ;;
+        4)
+            [[ $ENABLE_VMESS == true ]] && echo -e "${YELLOW}Already active.${NC}" && return
+            read -rp "$(echo -e "${YELLOW}VMess+WS port [default: 8080]: ${NC}")" VMESS_PORT
+            VMESS_PORT=${VMESS_PORT:-8080}
+            VMESS_UUID=$("$BIN" generate uuid)
+            VMESS_PATH=$(openssl rand -hex 4)
+            ENABLE_VMESS=true ;;
+        5)
+            [[ $ENABLE_TUIC == true ]] && echo -e "${YELLOW}Already active.${NC}" && return
+            read -rp "$(echo -e "${YELLOW}TUIC port [default: 8853]: ${NC}")" TUIC_PORT
+            TUIC_PORT=${TUIC_PORT:-8853}
+            TUIC_UUID=$("$BIN" generate uuid)
+            TUIC_PASS=$(openssl rand -hex 16)
+            gen_cert
+            ENABLE_TUIC=true ;;
         *) echo -e "${RED}Invalid.${NC}"; return ;;
     esac
 
@@ -445,25 +563,7 @@ do_add_protocol() {
     write_config
     "$BIN" check -c "$CFG_FILE" || { echo -e "${RED}Config invalid.${NC}"; return; }
 
-    cat > "$INFO_FILE" << EOF
-ENABLE_REALITY=${ENABLE_REALITY}
-ENABLE_HY2=${ENABLE_HY2}
-ENABLE_SOCKS5=${ENABLE_SOCKS5}
-SERVER_IP=${SERVER_IP}
-UUID=${UUID}
-PRIVATE_KEY=${PRIVATE_KEY}
-PUBLIC_KEY=${PUBLIC_KEY}
-SHORT_ID=${SHORT_ID}
-VLESS_PORT=${VLESS_PORT:-443}
-HY2_PORT=${HY2_PORT:-8443}
-HY2_PASS=${HY2_PASS}
-SOCKS_PORT=${SOCKS_PORT:-1080}
-SOCKS_USER=${SOCKS_USER}
-SOCKS_PASS=${SOCKS_PASS}
-CERT_FP=${CERT_FP}
-MAIN_IP=${MAIN_IP}
-EOF
-
+    write_info
     systemctl restart sing-box
     sleep 1
     echo -e "${GREEN}✓ Protocol added and service restarted.${NC}"
@@ -479,6 +579,8 @@ do_delete_protocol() {
     [[ $ENABLE_REALITY == true ]] && ((COUNT++))
     [[ $ENABLE_HY2     == true ]] && ((COUNT++))
     [[ $ENABLE_SOCKS5  == true ]] && ((COUNT++))
+    [[ $ENABLE_VMESS   == true ]] && ((COUNT++))
+    [[ $ENABLE_TUIC    == true ]] && ((COUNT++))
 
     if [[ $COUNT -le 1 ]]; then
         echo -e "${RED}Only one protocol active. Use Uninstall instead.${NC}"
@@ -491,6 +593,8 @@ do_delete_protocol() {
     [[ $ENABLE_REALITY == true ]] && echo -e "  ${GREEN}1.${NC} VLESS Reality"
     [[ $ENABLE_HY2     == true ]] && echo -e "  ${GREEN}2.${NC} Hysteria2"
     [[ $ENABLE_SOCKS5  == true ]] && echo -e "  ${GREEN}3.${NC} SOCKS5"
+    [[ $ENABLE_VMESS   == true ]] && echo -e "  ${GREEN}4.${NC} VMess + WebSocket"
+    [[ $ENABLE_TUIC    == true ]] && echo -e "  ${GREEN}5.${NC} TUIC"
     echo ""
     read -rp "$(echo -e "${YELLOW}Choice: ${NC}")" DEL_CHOICE
 
@@ -507,6 +611,14 @@ do_delete_protocol() {
             [[ $ENABLE_SOCKS5 != true ]] && echo -e "${YELLOW}Not active.${NC}" && return
             confirm "Remove SOCKS5?" || return
             ENABLE_SOCKS5=false ;;
+        4)
+            [[ $ENABLE_VMESS != true ]] && echo -e "${YELLOW}Not active.${NC}" && return
+            confirm "Remove VMess + WebSocket?" || return
+            ENABLE_VMESS=false ;;
+        5)
+            [[ $ENABLE_TUIC != true ]] && echo -e "${YELLOW}Not active.${NC}" && return
+            confirm "Remove TUIC?" || return
+            ENABLE_TUIC=false ;;
         *) echo -e "${RED}Invalid.${NC}"; return ;;
     esac
 
@@ -514,25 +626,7 @@ do_delete_protocol() {
     write_config
     "$BIN" check -c "$CFG_FILE" || { echo -e "${RED}Config invalid.${NC}"; return; }
 
-    cat > "$INFO_FILE" << EOF
-ENABLE_REALITY=${ENABLE_REALITY}
-ENABLE_HY2=${ENABLE_HY2}
-ENABLE_SOCKS5=${ENABLE_SOCKS5}
-SERVER_IP=${SERVER_IP}
-UUID=${UUID}
-PRIVATE_KEY=${PRIVATE_KEY}
-PUBLIC_KEY=${PUBLIC_KEY}
-SHORT_ID=${SHORT_ID}
-VLESS_PORT=${VLESS_PORT:-443}
-HY2_PORT=${HY2_PORT:-8443}
-HY2_PASS=${HY2_PASS}
-SOCKS_PORT=${SOCKS_PORT:-1080}
-SOCKS_USER=${SOCKS_USER}
-SOCKS_PASS=${SOCKS_PASS}
-CERT_FP=${CERT_FP}
-MAIN_IP=${MAIN_IP}
-EOF
-
+    write_info
     systemctl restart sing-box
     sleep 1
     echo -e "${GREEN}✓ Protocol removed and service restarted.${NC}"
