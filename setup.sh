@@ -683,6 +683,59 @@ do_update() {
     echo -e "${GREEN}✓ Updated to $($BIN version | grep -oP '[\d]+\.[\d]+\.[\d]+' | head -1)${NC}"
 }
 
+# ── BBR ───────────────────────────────────────────────────────────────────────
+
+do_bbr() {
+    header
+    echo -e " ${BOLD}BBR Congestion Control${NC}"
+    echo ""
+
+    local CC QDISC
+    CC=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
+    QDISC=$(sysctl -n net.core.default_qdisc 2>/dev/null)
+
+    if [[ "$CC" == "bbr" ]]; then
+        echo -e "  Status    : ${GREEN}● enabled${NC}"
+        printf "  %-10s ${GREEN}%s${NC}\n" "Qdisc:"  "$QDISC"
+        echo ""
+        echo -e "  ${GREEN}1.${NC}  Disable BBR  (revert to cubic)"
+    else
+        echo -e "  Status    : ${YELLOW}● disabled${NC}"
+        printf "  %-10s ${YELLOW}%s${NC}\n" "Current:" "$CC"
+        echo ""
+        echo -e "  ${GREEN}1.${NC}  Enable BBR"
+    fi
+    echo -e "  ${RED}0.${NC}  Back"
+    echo ""
+    read -rp "$(echo -e "${YELLOW}Choice: ${NC}")" BBR_OPT
+
+    case "$BBR_OPT" in
+        0) return ;;
+        1)
+            if [[ "$CC" == "bbr" ]]; then
+                confirm "Disable BBR and revert to cubic?" || return
+                sysctl -w net.ipv4.tcp_congestion_control=cubic  >/dev/null
+                sysctl -w net.core.default_qdisc=pfifo_fast      >/dev/null
+                rm -f /etc/sysctl.d/99-bbr.conf
+                echo -e "${GREEN}✓ BBR disabled. Reverted to cubic.${NC}"
+            else
+                modprobe tcp_bbr 2>/dev/null
+                if ! grep -q bbr /proc/sys/net/ipv4/tcp_available_congestion_control 2>/dev/null; then
+                    echo -e "${RED}✗ BBR is not supported by this kernel.${NC}"
+                    return
+                fi
+                sysctl -w net.core.default_qdisc=fq              >/dev/null
+                sysctl -w net.ipv4.tcp_congestion_control=bbr     >/dev/null
+                cat > /etc/sysctl.d/99-bbr.conf << 'SYSCTL'
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+SYSCTL
+                echo -e "${GREEN}✓ BBR enabled and set persistent.${NC}"
+            fi ;;
+        *) echo -e "${RED}Invalid.${NC}" ;;
+    esac
+}
+
 # ── Uninstall ──────────────────────────────────────────────────────────────────
 
 do_uninstall() {
@@ -726,14 +779,15 @@ main_menu() {
             echo -e "  ${GREEN}5.${NC} Stop / Start Service"
             echo -e "  ${GREEN}6.${NC} View Logs"
             echo -e "  ${GREEN}7.${NC} Update sing-box"
-            echo -e "  ${GREEN}8.${NC} Reinstall"
-            echo -e "  ${RED}9.${NC} Uninstall"
+            echo -e "  ${GREEN}8.${NC} BBR Enable / Disable"
+            echo -e "  ${GREEN}9.${NC} Reinstall"
+            echo -e "  ${RED}10.${NC} Uninstall"
             echo ""
             echo -e "  ${RED}0.${NC} Exit"
         fi
 
         echo ""
-        read -rp "$(echo -e "${YELLOW}Select [0-9]: ${NC}")" OPT
+        read -rp "$(echo -e "${YELLOW}Select [0-10]: ${NC}")" OPT
 
         case "$OPT" in
             1)
@@ -756,9 +810,10 @@ main_menu() {
             6)
                 journalctl -u sing-box -n 60 --no-pager
                 pause ;;
-            7) do_update;    pause ;;
-            8) do_uninstall; do_install; pause ;;
-            9) do_uninstall; pause ;;
+            7) do_update; pause ;;
+            8) do_bbr;    pause ;;
+            9) do_uninstall; do_install; pause ;;
+           10) do_uninstall; pause ;;
             0) exit 0 ;;
             *) echo -e "${RED}Invalid option.${NC}"; sleep 1 ;;
         esac
