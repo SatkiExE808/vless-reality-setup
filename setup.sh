@@ -32,7 +32,11 @@ header() {
 }
 
 _menu_sep()  { echo -e "  ${CYAN}────────────────────────────────────────────────────${NC}"; }
-_menu_hdr()  { echo -e "  ${CYAN}──── ${BOLD}$1${NC}${CYAN} $(printf '%.0s─' {1..40} | head -c $((44 - ${#1})))${NC}"; }
+_menu_hdr() {
+    local _n=$(( 46 - ${#1} )); (( _n < 1 )) && _n=1
+    local _d='' _i; for (( _i=0; _i<_n; _i++ )); do _d+='─'; done
+    echo -e "  ${CYAN}──── ${BOLD}$1${NC}${CYAN} ${_d}${NC}"
+}
 _menu_item() { printf "  ${GREEN}%3s${NC}  ${CYAN}›${NC}  %s\n" "$1" "$2"; }
 _menu_quit() { printf "  ${RED}%3s${NC}  ${CYAN}›${NC}  %s\n" "$1" "$2"; }
 
@@ -49,6 +53,12 @@ read_port() {
         read -rp "$(echo -e "${YELLOW}${_label} port [default: ${_def}]: ${NC}")" _pt
         _pt=${_pt:-$_def}
         if validate_port "$_pt"; then
+            if ss -tlnp 2>/dev/null | grep -q ":${_pt}\b" || \
+               ss -ulnp 2>/dev/null | grep -q ":${_pt}\b"; then
+                echo -e "${YELLOW}  ⚠ Port ${_pt} appears to be in use. Use anyway? [y/N]: ${NC}"
+                read -r _force
+                [[ ! "$_force" =~ ^[Yy]$ ]] && continue
+            fi
             printf -v "$3" '%s' "$_pt"
             return
         fi
@@ -306,7 +316,7 @@ show_info() {
 
     if [[ $ENABLE_REALITY == true ]]; then
         VLESS_LINK="vless://${UUID}@${SERVER_IP}:${VLESS_PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${SNI}&fp=chrome&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}&type=tcp#Reality-${SERVER_IP}"
-        echo -e " ${BOLD}${GREEN}◆ VLESS Reality${NC}"
+        echo -e "  ${BOLD}${GREEN}◆ VLESS Reality${NC}"
         echo -e "${CYAN}──────────────────────────────────────────────────${NC}"
         printf "  %-12s ${GREEN}%s${NC}\n" "Address:"   "$SERVER_IP"
         printf "  %-12s ${GREEN}%s${NC}\n" "Port:"      "$VLESS_PORT"
@@ -324,7 +334,7 @@ show_info() {
     if [[ $ENABLE_HY2 == true ]]; then
         HY2_LINK="hy2://${HY2_PASS}@${SERVER_IP}:${HY2_PORT}?insecure=1&sni=${SNI}#HY2-${SERVER_IP}"
         echo ""
-        echo -e " ${BOLD}${PURPLE}◆ Hysteria2${NC}"
+        echo -e "  ${BOLD}${PURPLE}◆ Hysteria2${NC}"
         echo -e "${CYAN}──────────────────────────────────────────────────${NC}"
         printf "  %-12s ${GREEN}%s${NC}\n" "Address:"  "$SERVER_IP"
         printf "  %-12s ${GREEN}%s${NC}\n" "Port:"     "$HY2_PORT"
@@ -340,7 +350,7 @@ show_info() {
         local VMESS_JSON="{\"v\":\"2\",\"ps\":\"VMess-${SERVER_IP}\",\"add\":\"${SERVER_IP}\",\"port\":${VMESS_PORT},\"id\":\"${VMESS_UUID}\",\"aid\":0,\"net\":\"ws\",\"type\":\"none\",\"host\":\"\",\"path\":\"/${VMESS_PATH}\",\"tls\":\"\"}"
         VMESS_LINK="vmess://$(echo -n "$VMESS_JSON" | base64 -w 0)"
         echo ""
-        echo -e " ${BOLD}${YELLOW}◆ VMess + WebSocket${NC}"
+        echo -e "  ${BOLD}${YELLOW}◆ VMess + WebSocket${NC}"
         echo -e "${CYAN}──────────────────────────────────────────────────${NC}"
         printf "  %-12s ${GREEN}%s${NC}\n" "Address:"   "$SERVER_IP"
         printf "  %-12s ${GREEN}%s${NC}\n" "Port:"      "$VMESS_PORT"
@@ -357,7 +367,7 @@ show_info() {
     if [[ $ENABLE_TUIC == true ]]; then
         TUIC_LINK="tuic://${TUIC_UUID}:${TUIC_PASS}@${SERVER_IP}:${TUIC_PORT}?congestion_control=bbr&alpn=h3&allow_insecure=1&sni=${SNI}#TUIC-${SERVER_IP}"
         echo ""
-        echo -e " ${BOLD}${PURPLE}◆ TUIC v5${NC}"
+        echo -e "  ${BOLD}${PURPLE}◆ TUIC v5${NC}"
         echo -e "${CYAN}──────────────────────────────────────────────────${NC}"
         printf "  %-12s ${GREEN}%s${NC}\n" "Address:"    "$SERVER_IP"
         printf "  %-12s ${GREEN}%s${NC}\n" "Port:"       "$TUIC_PORT"
@@ -373,7 +383,7 @@ show_info() {
 
     if [[ $ENABLE_SOCKS5 == true ]]; then
         echo ""
-        echo -e " ${BOLD}${BLUE}◆ SOCKS5${NC}"
+        echo -e "  ${BOLD}${BLUE}◆ SOCKS5${NC}"
         echo -e "${CYAN}──────────────────────────────────────────────────${NC}"
         printf "  %-12s ${GREEN}%s${NC}\n" "Address:"  "$SERVER_IP"
         printf "  %-12s ${GREEN}%s${NC}\n" "Port:"     "$SOCKS_PORT"
@@ -513,7 +523,7 @@ do_install() {
     write_service
 
     if systemctl is-active --quiet sing-box; then
-        echo -e "${GREEN}✓ sing-box is running${NC}"
+        echo -e "${GREEN}✓ Service started successfully${NC}"
     else
         echo -e "${RED}✗ Failed to start. Check: journalctl -u sing-box -n 30${NC}"
         return 1
@@ -619,7 +629,9 @@ do_add_protocol() {
     write_info
     systemctl restart sing-box
     sleep 1
-    echo -e "${GREEN}✓ Protocol added and service restarted.${NC}"
+    systemctl is-active --quiet sing-box \
+        && echo -e "${GREEN}✓ Service restarted.${NC}" \
+        || echo -e "${RED}✗ Service failed to start — check: journalctl -u sing-box -n 20${NC}"
     show_info
 }
 
@@ -686,7 +698,9 @@ do_delete_protocol() {
     write_info
     systemctl restart sing-box
     sleep 1
-    echo -e "${GREEN}✓ ${_LABEL} removed and service restarted.${NC}"
+    systemctl is-active --quiet sing-box \
+        && echo -e "${GREEN}✓ Service restarted.${NC}" \
+        || echo -e "${RED}✗ Service failed to start — check: journalctl -u sing-box -n 20${NC}"
     show_info
 }
 
@@ -894,7 +908,6 @@ dns_provider() {
         8.26.56.26|8.20.247.20)          echo "Comodo" ;;
         185.228.168.9|185.228.169.9)     echo "CleanBrowsing" ;;
         77.88.8.8|77.88.8.1)            echo "Yandex" ;;
-        8.20.247.20|8.26.56.26)          echo "Comodo" ;;
         76.76.19.19|76.223.122.150)      echo "Alternate DNS" ;;
         127.0.0.53)                       echo "systemd-resolved (local stub)" ;;
         127.0.0.1)                        echo "localhost" ;;
@@ -911,7 +924,7 @@ dns_provider() {
 vps_check_dns() {
     echo ""
     echo -e "${CYAN}══════════════════════════════════════════════════${NC}"
-    echo -e " ${BOLD}Current DNS Servers:${NC}"
+    echo -e "  ${BOLD}Current DNS Servers:${NC}"
     echo ""
     while read -r _ ip; do
         local _PROV
@@ -919,7 +932,7 @@ vps_check_dns() {
         printf "  ${GREEN}%-18s${NC} ${CYAN}%s${NC}\n" "$ip" "$_PROV"
     done < <(grep "^nameserver" /etc/resolv.conf 2>/dev/null)
     echo ""
-    echo -e " ${BOLD}Resolution Test:${NC}"
+    echo -e "  ${BOLD}Resolution Test:${NC}"
     echo ""
     for _dom in google.com cloudflare.com github.com; do
         local _RES
@@ -963,7 +976,7 @@ vps_change_dns() {
         6) _D1="8.26.56.26";     _D2="8.20.247.20" ;;
         7)
             read -rp "$(echo -e "${YELLOW}Primary DNS:   ${NC}")" _D1
-            read -rp "$(echo -e "${YELLOW}Secondary DNS: ${NC}")" _D2
+            read -rp "$(echo -e "${YELLOW}Secondary DNS (optional): ${NC}")" _D2
             [[ -z "$_D1" ]] && echo -e "${RED}Primary DNS cannot be empty.${NC}" && return
             ;;
         *) echo -e "${RED}Invalid.${NC}"; return ;;
@@ -1023,6 +1036,8 @@ vps_change_dns() {
             > /etc/dhcp/dhclient-enter-hooks.d/nodnsupdate
         chmod +x /etc/dhcp/dhclient-enter-hooks.d/nodnsupdate
     fi
+
+    [[ -z "$_D2" ]] && _D2="$_D1"  # fall back to primary if secondary empty
 
     # ── 5. Direct /etc/resolv.conf write ────────────────────────────
     cp -L "$_RESOLV" "${_RESOLV}.bak" 2>/dev/null || true
@@ -1244,21 +1259,22 @@ do_uninstall() {
     systemctl disable sing-box 2>/dev/null
     rm -f "$SERVICE" "$BIN"
     rm -rf "$CFG_DIR"
+    rm -f "$SHORTCUT"
     systemctl daemon-reload
-    echo -e "${GREEN}✓ Uninstalled.${NC}"
+    echo -e "${GREEN}✓ Fully uninstalled. Run the quick-start command to reinstall.${NC}"
 }
 
 # ── Shortcut ───────────────────────────────────────────────────────────────────
 
 install_shortcut() {
-    [[ -x "$SHORTCUT" ]] && return
+    local _existed=0
+    [[ -x "$SHORTCUT" ]] && _existed=1
     cat > "$SHORTCUT" << 'EOF'
 #!/bin/bash
 bash <(curl -sL https://raw.githubusercontent.com/SatkiExE808/vless-reality-setup/main/setup.sh)
 EOF
     chmod +x "$SHORTCUT"
-    echo -e "${GREEN}✓ Shortcut installed — type ${BOLD}sb${NC}${GREEN} anywhere to reopen this manager${NC}"
-    echo ""
+    [[ "$_existed" -eq 0 ]] && echo -e "${GREEN}✓ Shortcut installed — type ${BOLD}sb${NC}${GREEN} anywhere to reopen this manager${NC}" && echo ""
 }
 
 # ── Main menu ──────────────────────────────────────────────────────────────────
@@ -1278,13 +1294,14 @@ main_menu() {
         echo -e "${CYAN}║${NC}  ${CYAN}github.com/SatkiExE808/vless-reality-setup${NC}       ${CYAN}║${NC}"
         echo -e "${CYAN}╠══════════════════════════════════════════════════╣${NC}"
         if is_installed; then
+            local _ver_display="${_SB_VER:-?}"
             if [[ "$_SB_STATUS" == "active" ]]; then
-                echo -e "${CYAN}║${NC}  Status  ${GREEN}● running${NC}      Version  ${GREEN}${_SB_VER:-?}${NC}$(printf '%*s' $((19 - ${#_SB_VER})) '')${CYAN}║${NC}"
+                echo -e "${CYAN}║${NC}  Status  ${GREEN}● running${NC}      Version  ${GREEN}${_ver_display}${NC}$(printf '%*s' $((16 - ${#_ver_display})) '')${CYAN}║${NC}"
             else
-                echo -e "${CYAN}║${NC}  Status  ${RED}● stopped${NC}      Version  ${_SB_VER:-?}$(printf '%*s' $((19 - ${#_SB_VER})) '')${CYAN}║${NC}"
+                echo -e "${CYAN}║${NC}  Status  ${RED}● stopped${NC}      Version  ${_ver_display}$(printf '%*s' $((16 - ${#_ver_display})) '')${CYAN}║${NC}"
             fi
         else
-            echo -e "${CYAN}║${NC}  Status  ${YELLOW}not installed${NC}                            ${CYAN}║${NC}"
+            echo -e "${CYAN}║${NC}  Status  ${YELLOW}not installed${NC}                           ${CYAN}║${NC}"
         fi
         echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}"
         echo ""
