@@ -1066,6 +1066,20 @@ vps_node_quality() {
     bash <(curl -sL https://run.NodeQuality.com)
 }
 
+vps_check_place() {
+    echo -e "${YELLOW}▶ Running Check.Place...${NC}"
+    echo -e "  ${CYAN}Press Ctrl+C to abort.${NC}"
+    echo ""
+    bash <(curl -Ls Check.Place) -N
+}
+
+vps_hardware_quality() {
+    echo -e "${YELLOW}▶ Running Hardware Quality check...${NC}"
+    echo -e "  ${CYAN}Press Ctrl+C to abort.${NC}"
+    echo ""
+    bash <(curl -Ls https://Hardware.Check.Place)
+}
+
 vps_yabs() {
     echo -e "${YELLOW}▶ Starting YABS benchmark...${NC}"
     echo -e "  ${CYAN}Includes: disk I/O, CPU, and network speed tests.${NC}"
@@ -1092,21 +1106,25 @@ do_vps_tools() {
         echo -e "  ${GREEN}5.${NC}  IP Quality Check"
         echo -e "  ${GREEN}6.${NC}  Run YABS Benchmark"
         echo -e "  ${GREEN}7.${NC}  Node Quality Check"
-        echo -e "  ${GREEN}8.${NC}  System Update"
+        echo -e "  ${GREEN}8.${NC}  Check.Place"
+        echo -e "  ${GREEN}9.${NC}  Hardware Quality Check"
+        echo -e "  ${GREEN}10.${NC} System Update"
         echo ""
         echo -e "  ${RED}0.${NC}  Back"
         echo ""
-        read -rp "$(echo -e "${YELLOW}Choice [0-8]: ${NC}")" _VT
+        read -rp "$(echo -e "${YELLOW}Choice [0-10]: ${NC}")" _VT
 
         case "$_VT" in
-            1) header; vps_check_ip;       pause ;;
-            2) header; vps_speedtest;      pause ;;
-            3) header; vps_check_dns;      pause ;;
-            4) vps_change_dns;             pause ;;
-            5) header; vps_ip_quality;     pause ;;
-            6) header; vps_yabs;           pause ;;
-            7) header; vps_node_quality;   pause ;;
-            8) header; vps_system_update;  pause ;;
+            1)  header; vps_check_ip;        pause ;;
+            2)  header; vps_speedtest;       pause ;;
+            3)  header; vps_check_dns;       pause ;;
+            4)  vps_change_dns;              pause ;;
+            5)  header; vps_ip_quality;      pause ;;
+            6)  header; vps_yabs;            pause ;;
+            7)  header; vps_node_quality;    pause ;;
+            8)  header; vps_check_place;     pause ;;
+            9)  header; vps_hardware_quality; pause ;;
+            10) header; vps_system_update;   pause ;;
             0) return ;;
             *) echo -e "${RED}Invalid.${NC}"; sleep 1 ;;
         esac
