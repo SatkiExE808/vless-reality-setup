@@ -523,10 +523,12 @@ do_add_protocol() {
     for i in "${!_NAMES[@]}"; do
         printf "  ${GREEN}%d.${NC}  %-22s ${CYAN}(%s)${NC}\n" $((i+1)) "${_NAMES[$i]}" "${_DESCS[$i]}"
     done
+    echo -e "  ${RED}0.${NC}  Back"
 
     echo ""
-    read -rp "$(echo -e "${YELLOW}Choice [1-${#_NAMES[@]}]: ${NC}")" ADD_CHOICE
+    read -rp "$(echo -e "${YELLOW}Choice [0-${#_NAMES[@]}]: ${NC}")" ADD_CHOICE
 
+    [[ "$ADD_CHOICE" == "0" ]] && return
     if ! [[ "$ADD_CHOICE" =~ ^[0-9]+$ ]] || (( ADD_CHOICE < 1 || ADD_CHOICE > ${#_NAMES[@]} )); then
         echo -e "${RED}Invalid.${NC}"; return
     fi
@@ -619,10 +621,12 @@ do_delete_protocol() {
     for i in "${!_NAMES[@]}"; do
         echo -e "  ${GREEN}$((i+1)).${NC}  ${_NAMES[$i]}"
     done
+    echo -e "  ${RED}0.${NC}  Back"
 
     echo ""
-    read -rp "$(echo -e "${YELLOW}Choice [1-${#_NAMES[@]}]: ${NC}")" DEL_CHOICE
+    read -rp "$(echo -e "${YELLOW}Choice [0-${#_NAMES[@]}]: ${NC}")" DEL_CHOICE
 
+    [[ "$DEL_CHOICE" == "0" ]] && return
     if ! [[ "$DEL_CHOICE" =~ ^[0-9]+$ ]] || (( DEL_CHOICE < 1 || DEL_CHOICE > ${#_NAMES[@]} )); then
         echo -e "${RED}Invalid.${NC}"; return
     fi
