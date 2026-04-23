@@ -1211,23 +1211,134 @@ EOF
     fi
 }
 
+vps_system_info() {
+    echo ""
+    echo -e "${CYAN}══════════════════════════════════════════════════${NC}"
+    echo -e "  ${BOLD}System Overview${NC}"
+    echo -e "${CYAN}══════════════════════════════════════════════════${NC}"
+
+    local _OS _KERNEL _ARCH _CPU _CORES _LOAD _UPTIME
+    _OS=$(grep PRETTY_NAME /etc/os-release 2>/dev/null | cut -d'"' -f2)
+    _KERNEL=$(uname -r)
+    _ARCH=$(uname -m)
+    _CPU=$(grep -m1 "model name" /proc/cpuinfo | cut -d':' -f2 | sed 's/^[ \t]*//')
+    _CORES=$(nproc)
+    _LOAD=$(cut -d' ' -f1-3 /proc/loadavg)
+    _UPTIME=$(uptime -p 2>/dev/null | sed 's/up //')
+
+    printf "  %-14s ${GREEN}%s${NC}\n"          "OS:"      "${_OS:-N/A}"
+    printf "  %-14s ${GREEN}%s (%s)${NC}\n"     "Kernel:"  "$_KERNEL" "$_ARCH"
+    printf "  %-14s ${GREEN}%s${NC}\n"          "CPU:"     "${_CPU:-N/A}"
+    printf "  %-14s ${GREEN}%s core(s)${NC}\n"  "Cores:"   "$_CORES"
+    printf "  %-14s ${GREEN}%s${NC}\n"          "Load Avg:" "$_LOAD"
+    printf "  %-14s ${GREEN}%s${NC}\n"          "Uptime:"  "${_UPTIME:-N/A}"
+    echo ""
+
+    # Memory
+    echo -e "  ${BOLD}Memory${NC}"
+    local _MEM_LINE _MEM_TOTAL _MEM_USED _MEM_FREE _MEM_PCT
+    _MEM_LINE=$(free -h | awk '/^Mem:/{print $2" "$3" "$7}')
+    _MEM_TOTAL=$(echo "$_MEM_LINE" | awk '{print $1}')
+    _MEM_USED=$(echo "$_MEM_LINE"  | awk '{print $2}')
+    _MEM_FREE=$(echo "$_MEM_LINE"  | awk '{print $3}')
+    _MEM_PCT=$(free | awk '/^Mem:/{printf "%.0f", $3/$2*100}')
+    printf "    Total: ${GREEN}%s${NC}   Used: ${YELLOW}%s (%s%%)${NC}   Avail: ${GREEN}%s${NC}\n" \
+        "$_MEM_TOTAL" "$_MEM_USED" "$_MEM_PCT" "$_MEM_FREE"
+
+    # Swap
+    local _SWAP_TOTAL _SWAP_USED
+    _SWAP_TOTAL=$(free -h | awk '/^Swap:/{print $2}')
+    _SWAP_USED=$(free  -h | awk '/^Swap:/{print $3}')
+    [[ "$_SWAP_TOTAL" != "0B" ]] && \
+        printf "    Swap:  ${GREEN}%s${NC}   Used: ${YELLOW}%s${NC}\n" "$_SWAP_TOTAL" "$_SWAP_USED"
+    echo ""
+
+    # Disk
+    echo -e "  ${BOLD}Disk${NC}"
+    df -h --output=source,size,used,avail,pcent,target 2>/dev/null | \
+        awk 'NR==1 || /^\/dev/' | head -6 | while read -r line; do
+            if [[ "$line" == Filesystem* ]]; then
+                printf "    ${CYAN}%s${NC}\n" "$line"
+            else
+                printf "    %s\n" "$line"
+            fi
+        done
+    echo -e "${CYAN}══════════════════════════════════════════════════${NC}"
+}
+
+vps_check_ports() {
+    echo ""
+    echo -e "${CYAN}══════════════════════════════════════════════════${NC}"
+    echo -e "  ${BOLD}Listening Ports${NC}"
+    echo -e "${CYAN}══════════════════════════════════════════════════${NC}"
+    echo ""
+    printf "  ${CYAN}%-6s %-8s %-22s %s${NC}\n" "PROTO" "PORT" "ADDRESS" "PROCESS"
+    echo -e "  ${CYAN}──────────────────────────────────────────────────${NC}"
+    ss -tulnp 2>/dev/null | awk 'NR>1 {
+        split($5, a, ":");
+        port = a[length(a)];
+        addr = "";
+        for (i=1; i<length(a); i++) {
+            addr = (addr == "" ? "" : addr ":") a[i];
+        }
+        proc = "";
+        for (i=7; i<=NF; i++) proc = proc " " $i;
+        gsub(/.*"/, "", proc); gsub(/".*/, "", proc);
+        printf "  %-6s %-8s %-22s %s\n", toupper($1), port, addr, proc
+    }' | sort -k2 -n | head -30
+    echo -e "${CYAN}══════════════════════════════════════════════════${NC}"
+}
+
 do_vps_tools() {
     while true; do
-        header
-        echo -e "  ${BOLD}VPS Toolbox${NC}"
+        clear
+        # ── Fancy header ─────────────────────────────────────────
+        local _UP _LOAD _MEM_PCT
+        _UP=$(uptime -p 2>/dev/null | sed 's/up //' | cut -c1-20)
+        _LOAD=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null)
+        _MEM_PCT=$(free 2>/dev/null | awk '/^Mem:/{printf "%.0f", $3/$2*100}')
+
+        echo -e "${CYAN}╔══════════════════════════════════════════════════╗${NC}"
+        echo -e "${CYAN}║${NC}  ${BOLD}${YELLOW}⚙  V P S   T O O L B O X${NC}                         ${CYAN}║${NC}"
+        echo -e "${CYAN}╠══════════════════════════════════════════════════╣${NC}"
+        printf "${CYAN}║${NC}  Uptime ${GREEN}%-15s${NC}  Load ${GREEN}%-5s${NC}  Mem ${YELLOW}%3s%%${NC}  ${CYAN}║${NC}\n" \
+            "${_UP:-N/A}" "${_LOAD:-N/A}" "${_MEM_PCT:-?}"
+        echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}"
         echo ""
+
+        # ── Status chips ─────────────────────────────────────────
+        local _CC _BBR_CHIP _F2B_CHIP
+        _CC=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
+        if [[ "$_CC" == "bbr" ]]; then
+            _BBR_CHIP="${GREEN}● BBR${NC}"
+        else
+            _BBR_CHIP="${YELLOW}○ BBR${NC}"
+        fi
+        if systemctl is-active --quiet fail2ban 2>/dev/null; then
+            _F2B_CHIP="${GREEN}● Fail2Ban${NC}"
+        elif command -v fail2ban-client &>/dev/null; then
+            _F2B_CHIP="${RED}○ Fail2Ban${NC}"
+        else
+            _F2B_CHIP="${PURPLE}◌ Fail2Ban${NC}"
+        fi
+        echo -e "  Active: ${_BBR_CHIP}   ${_F2B_CHIP}"
+        echo ""
+
+        # ── Menu ─────────────────────────────────────────────────
         _menu_hdr "Network"
-        _menu_item  1  "Check IP Info"
-        _menu_item  2  "Speed Test"
-        _menu_item  3  "Check DNS"
-        _menu_item  4  "Change DNS"
+        printf "  ${GREEN}%3s${NC}  ${CYAN}›${NC}  %-22s ${CYAN}%s${NC}\n"  1  "Check IP Info"        "geolocation · ASN · proxy flag"
+        printf "  ${GREEN}%3s${NC}  ${CYAN}›${NC}  %-22s ${CYAN}%s${NC}\n"  2  "Speed Test"           "download + upload · global CDNs"
+        printf "  ${GREEN}%3s${NC}  ${CYAN}›${NC}  %-22s ${CYAN}%s${NC}\n"  3  "Check DNS"            "current resolvers · test lookups"
+        printf "  ${GREEN}%3s${NC}  ${CYAN}›${NC}  %-22s ${CYAN}%s${NC}\n"  4  "Change DNS"           "Cloudflare · Google · Quad9 · ..."
+        printf "  ${GREEN}%3s${NC}  ${CYAN}›${NC}  %-22s ${CYAN}%s${NC}\n"  5  "Listening Ports"      "what's actually open"
         echo ""
         _menu_hdr "Diagnostics"
-        _menu_item  5  "Node Quality Check"
+        printf "  ${GREEN}%3s${NC}  ${CYAN}›${NC}  %-22s ${CYAN}%s${NC}\n"  6  "System Info"          "CPU · RAM · disk · uptime"
+        printf "  ${GREEN}%3s${NC}  ${CYAN}›${NC}  %-22s ${CYAN}%s${NC}\n"  7  "Node Quality Check"   "NodeQuality.com benchmark"
         echo ""
         _menu_hdr "Maintenance"
-        _menu_item  6  "System Update"
-        _menu_item  7  "Fail2Ban"
+        printf "  ${GREEN}%3s${NC}  ${CYAN}›${NC}  %-22s ${CYAN}%s${NC}\n"  8  "System Update"        "apt update + upgrade"
+        printf "  ${GREEN}%3s${NC}  ${CYAN}›${NC}  %-22s ${CYAN}%s${NC}\n"  9  "Fail2Ban"             "SSH brute-force protection"
         _menu_sep
         echo ""
         _menu_quit  0  "Back"
@@ -1239,9 +1350,11 @@ do_vps_tools() {
             2)  header; vps_speedtest;      pause ;;
             3)  header; vps_check_dns;      pause ;;
             4)  vps_change_dns;             pause ;;
-            5)  header; vps_node_quality;   pause ;;
-            6)  header; vps_system_update;  pause ;;
-            7)  vps_fail2ban;               pause ;;
+            5)  header; vps_check_ports;    pause ;;
+            6)  header; vps_system_info;    pause ;;
+            7)  header; vps_node_quality;   pause ;;
+            8)  header; vps_system_update;  pause ;;
+            9)  vps_fail2ban;               pause ;;
             0) return ;;
             *) echo -e "${RED}Invalid.${NC}"; sleep 1 ;;
         esac
