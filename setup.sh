@@ -1418,8 +1418,12 @@ main_menu() {
         echo ""
 
         if ! is_installed; then
-            _menu_sep
+            _menu_hdr "Proxy"
             _menu_item  1  "Install sing-box"
+            echo ""
+            _menu_hdr "System"
+            _menu_item  8  "BBR Enable / Disable"
+            _menu_item  9  "VPS Toolbox"
             _menu_sep
             echo ""
             _menu_quit  0  "Exit"
@@ -1448,10 +1452,19 @@ main_menu() {
         echo ""
         read -rp "$(echo -e "${YELLOW}  Select: ${NC}")" OPT
 
+        if ! is_installed; then
+            case "$OPT" in
+                1) do_install;  pause ;;
+                8) do_bbr;      pause ;;
+                9) do_vps_tools ;;
+                0) exit 0 ;;
+                *) echo -e "${RED}Not available until sing-box is installed. Choose 1 to install.${NC}"; sleep 1.5 ;;
+            esac
+            continue
+        fi
+
         case "$OPT" in
-            1)
-                if is_installed; then show_info; else do_install; fi
-                pause ;;
+            1) show_info;          pause ;;
             2) do_add_protocol;    pause ;;
             3) do_delete_protocol; pause ;;
             4)
