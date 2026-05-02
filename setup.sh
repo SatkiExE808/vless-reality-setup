@@ -982,6 +982,8 @@ vps_change_dns() {
     esac
 
     echo ""
+    [[ -z "$_D2" ]] && _D2="$_D1"   # ensure secondary is never empty before any writes
+
     local _RESOLV="/etc/resolv.conf"
     local _methods=""
 
@@ -1036,8 +1038,6 @@ vps_change_dns() {
         chmod +x /etc/dhcp/dhclient-enter-hooks.d/nodnsupdate
     fi
 
-    [[ -z "$_D2" ]] && _D2="$_D1"  # fall back to primary if secondary empty
-
     # ── 5. Direct /etc/resolv.conf write ────────────────────────────
     cp -L "$_RESOLV" "${_RESOLV}.bak" 2>/dev/null || true
     [[ -L "$_RESOLV" ]] && rm -f "$_RESOLV"   # remove symlink BEFORE chattr
@@ -1049,7 +1049,7 @@ vps_change_dns() {
     # ── Restart Tailscale (now it can't overwrite the protected file) ─
     if [[ "$_ts_was_running" -eq 1 ]]; then
         systemctl start tailscaled 2>/dev/null || true
-        _methods+="→restarted"
+        _methods+=" →restarted"
     fi
 
     echo -e "${GREEN}✓ DNS changed to ${_D1} / ${_D2}${NC}"
